@@ -195,7 +195,7 @@ footer{text-align:center;font:10px var(--mono);color:var(--muted);padding:20px}
     <div>
       <p class="eyebrow">Evaluation · BIRD Mini-Dev (SQLite)</p>
       <h1>Measured, <span>not claimed.</span></h1>
-      <p>Three setups answer the same questions with the same schema, hints and model family. Scored with BIRD's official execution-accuracy rule. Separate from the demo database.</p>
+      <p>Three setups answer the same questions with the same schema, hints and model family, running locally on open-weight models. Scored with BIRD's official execution-accuracy rule. Separate from the demo database.</p>
     </div>
   </div>
 
@@ -223,7 +223,7 @@ footer{text-align:center;font:10px var(--mono);color:var(--muted);padding:20px}
   </div>
 </section>
 </main>
-<footer>QueryPilot · LangGraph · Mistral · MCP · read-only SQLite sandbox</footer>
+<footer>QueryPilot · LangGraph · local open-weight models (Ollama) · MCP · read-only SQLite sandbox</footer>
 
 <script>
 const $ = s => document.querySelector(s);
@@ -245,7 +245,7 @@ document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
 /* info */
 fetch("/api/info").then(r => r.json()).then(info => {
   const m = $("#mode");
-  m.textContent = info.mode === "live" ? "● live · mistral" : "● offline demo";
+  m.textContent = info.mode === "live" ? `● live · ${info.provider === "ollama" ? "local " + info.models[1] : info.models[1]}` : "● offline demo";
   m.classList.toggle("off", info.mode !== "live");
   $("#examples").innerHTML = info.examples.map(e => `<button class="chip">${esc(e)}</button>`).join("");
   $("#examples").querySelectorAll(".chip").forEach(c => c.onclick = () => { $("#q").value = c.textContent; run(); });
@@ -275,7 +275,7 @@ function addStep(e) {
   }
   else if (e.type === "repair") body = `<span class="k">self-repair #${e.attempt}</span><br>${esc(e.reason)}`;
   else if (e.type === "escalate") body = `<span class="k">escalate → ${esc(e.model)}</span><br>${esc(e.reason)}`;
-  else if (e.type === "done") body = `<span class="k">done</span> · ${esc(e.status)} · $${(+e.cost).toFixed(4)}`;
+  else if (e.type === "done") body = `<span class="k">done</span> · ${esc(e.status)} · ${e.cost > 0 ? "$" + (+e.cost).toFixed(4) : (e.tokens || 0) + " tokens"}`;
   else return;
   li.innerHTML = `<span class="ic ${cls}">${ic}</span><div>${body}</div>`;
   $("#trace").appendChild(li);
@@ -288,7 +288,7 @@ function showAnswer(a) {
   $("#answer").textContent = a.text || (a.status === "ok" ? "Here is what the data says:" : "The agent could not produce a valid answer.");
   const st = [`<span class="stat ${a.status === "ok" ? "ok" : "bad"}">${esc(a.status)}</span>`,
     `<span class="stat">${a.rows.length} rows</span>`, `<span class="stat">${a.calls} llm calls</span>`,
-    `<span class="stat">$${(+a.cost).toFixed(4)}</span>`];
+    a.cost > 0 ? `<span class="stat">$${(+a.cost).toFixed(4)}</span>` : `<span class="stat">${a.tokens || 0} tokens · $0</span>`];
   if (a.escalated) st.push(`<span class="stat up">escalated to large model</span>`);
   $("#stats").innerHTML = st.join("");
   $("#answermeta").textContent = (a.models || []).join(", ");
@@ -363,7 +363,8 @@ async function loadResults() {
   loaded = true;
   $("#cards").innerHTML = setups.map(([k, s]) => `<div class="card"><h3>${NAMES[k] || k}</h3>
     <div class="ex">${s.ex}%</div><span class="mono" style="font-size:10px">execution accuracy · ${s.n} questions</span>
-    <dl><dt>cost / question</dt><dd>$${s.cost_per_question_usd.toFixed(4)}</dd>
+    <dl>${s.cost_per_question_usd > 0 ? `<dt>cost / question</dt><dd>$${s.cost_per_question_usd.toFixed(4)}</dd>` : ""}
+    <dt>tokens / question</dt><dd>${(s.tokens_per_question || 0).toLocaleString()}</dd>
     <dt>avg latency</dt><dd>${s.avg_latency_s} s</dd><dt>llm calls</dt><dd>${s.avg_llm_calls}</dd>
     <dt>escalated</dt><dd>${s.escalation_rate}%</dd><dt>near-misses*</dt><dd>${s.near_misses_not_counted}</dd></dl></div>`).join("");
   const diffs = [...new Set(setups.flatMap(([, s]) => Object.keys(s.by_difficulty)))];
@@ -386,7 +387,7 @@ async function loadResults() {
   $("#method").innerHTML = `<b>Scoring.</b> A prediction is correct when its result has the same set of rows as the reference query (BIRD's official rule: row order and duplicates ignored). Errors, blocked queries and timeouts (30 s) count as wrong.
     <b>Fairness.</b> All setups get the same questions, database, schema text${m.evidence ? " and evidence hints" : ""}; one-shot and agent use the same large model; temperature 0.
     <b>Transparency.</b> API failures count as wrong. *Near-misses (right rows with extra columns or rounding) are shown but never counted as correct.
-    Run: ${esc(m.date || "?")} · models: ${esc([...new Set(setups.flatMap(([, s]) => s.models))].join(", "))}.`;
+    Run: ${esc(m.date || "?")} · ${esc(m.models || "")} · models reported: ${esc([...new Set(setups.flatMap(([, s]) => s.models))].join(", "))}.`;
 }
 </script>
 </body>

@@ -4,7 +4,9 @@
 
 It is evaluated on **BIRD Mini-Dev**, a public text-to-SQL benchmark of 500 questions over real-world databases, comparing three setups on accuracy, cost and latency.
 
-`LangGraph` · `Mistral` · `MCP` · `FastAPI` · `SQLite` · `Docker`
+`LangGraph` · `Ollama` · `Qwen2.5-Coder` · `MCP` · `FastAPI` · `SQLite` · `Docker`
+
+It runs **entirely locally on open-weight models**: no API cost, and the data never leaves the machine.
 
 ---
 
@@ -18,7 +20,7 @@ question ─▶ think ─▶ use tools ─▶ think ─▶ submit SQL ─▶ ver
 
 - **Explores before answering.** Tools: `list_tables`, `describe_table`, `sample_rows`, `run_sql` (exploration) and `submit_sql` (final answer). It checks real values, for example that a status is stored as `'delivered'` and not `'Delivered'`, before filtering on them.
 - **Verifies and self-repairs.** A submitted query is executed. If it fails or returns nothing, the agent gets the error back and fixes the query (up to 3 repairs).
-- **Routes between models for cost.** It starts on Mistral Small and escalates to Mistral Large only when verification fails or the step budget runs out.
+- **Routes between models for efficiency.** It starts on a small model (Qwen2.5-Coder 3B) and escalates to the larger one (7B) only when verification fails or the step budget runs out.
 - **Read-only by construction** (see [Safety](#safety)).
 - **Speaks MCP.** The same tools are exposed as a Model Context Protocol server, so Claude Desktop, IDEs or other agents can use the sandbox directly.
 
@@ -32,14 +34,15 @@ The web app shows the agent's trace live: every tool call, failed query, repair 
 
 | Setup | Description |
 |---|---|
-| `one_shot` | Mistral Large writes the SQL in one call. No tools, no repair. |
-| `agent` | Full agent loop on Mistral Large. |
-| `routed` | Same agent, starting on Mistral Small, escalating to Large when needed. |
+| `one_shot` | The 7B model writes the SQL in one call. No tools, no repair. |
+| `agent` | Full agent loop on the 7B model. |
+| `routed` | Same agent, starting on the 3B model, escalating to 7B when needed. |
 
 **Fairness rules:**
 - All setups get the same question, the same evidence hint and the same schema text: table definitions plus 2 example rows per table. The agent's only advantage is its tools and self-repair.
 - `one_shot` and `agent` use the same model, so the difference measures the agent loop, not the model.
-- Temperature is 0. The exact model versions returned by the API and the run date are recorded.
+- Temperature is 0 with a fixed seed. The models and the run date are recorded.
+- **Efficiency is measured in tokens and time per question** (local models have no per-call price).
 - Prompts were not tuned on the 500 test questions.
 
 **Scoring** follows BIRD's official `evaluation_ex.py`:
@@ -70,13 +73,18 @@ Every query, from the agent, the MCP server or the benchmark, runs through `Safe
 
 ## Run it
 
-Requires Python 3.11+ and a [Mistral API key](https://console.mistral.ai).
+Requires Python 3.11+ and [Ollama](https://ollama.com). The defaults fit a 6 GB GPU. Install the models once:
+
+```bash
+ollama pull qwen2.5-coder:7b
+ollama pull qwen2.5-coder:3b
+```
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
 pip install -r requirements-dev.txt
-copy .env.example .env            # macOS/Linux: cp .env.example .env  — then add your key
+copy .env.example .env            # macOS/Linux: cp .env.example .env
 ```
 
 **Web app** (demo database: a European online shop with customers, orders, deliveries and reviews):
@@ -85,7 +93,7 @@ copy .env.example .env            # macOS/Linux: cp .env.example .env  — then 
 uvicorn querypilot.server:app --port 8000      # open http://localhost:8000
 ```
 
-Without a key, the app runs in a clearly labelled offline mode that replays a placeholder run.
+If Ollama isn't running, the app starts in a clearly labelled offline mode that replays a placeholder run.
 
 **Benchmark:**
 
@@ -95,9 +103,10 @@ python -m querypilot.evaluate --limit 20        # quick check
 python -m querypilot.evaluate                   # full run: 500 questions × 3 setups
 ```
 
-- **Cost check:** after 20 questions, the runner prints the projected total cost and asks before continuing.
+- **Time check:** after 20 runs, the runner prints the projected total time. Setups run one after another, so a small GPU keeps a single model loaded.
 - **Resuming:** an interrupted run resumes where it stopped.
-- **Offline dry run:** `--fake` tests the pipeline without any API cost.
+- **Offline dry run:** `--fake` tests the pipeline without a model.
+- **Paid API option:** set `QP_PROVIDER=mistral` and `MISTRAL_API_KEY` in `.env` to use Mistral's API instead.
 
 **MCP server:**
 
@@ -124,7 +133,7 @@ docker run -p 8000:8000 --env-file .env querypilot
 querypilot/
   safe_db.py     read-only sandbox (all layers above)
   agent.py       LangGraph agent, self-repair, model routing, one-shot baseline
-  llm.py         Mistral client (cost + exact model version per call), fake model for tests
+  llm.py         Ollama client (default) and Mistral client, token + time tracking, fake model for tests
   scoring.py     official BIRD execution accuracy + diagnostics + failure categories
   evaluate.py    benchmark runner (resumable, cost check, summary)
   server.py      FastAPI app, live agent trace over server-sent events, rate limit
@@ -138,4 +147,4 @@ tests/           safety, scoring, agent loop and runner tests
 
 - **Scope of the numbers:** BIRD Mini-Dev measures text-to-SQL on its own databases. The numbers don't promise the same accuracy on any company's data.
 - **Demo data:** the demo shop is synthetic (generated with a fixed seed).
-- **Prices:** cost figures use Mistral's published per-token prices at run time (configurable in `.env`). Check them against current pricing.
+- **Model size:** results are for small local models (3B/7B). Larger models would score higher; the comparison between setups is what this project measures.

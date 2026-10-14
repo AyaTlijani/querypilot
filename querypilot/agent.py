@@ -99,6 +99,7 @@ class Run(TypedDict, total=False):
     status: str          # ok | empty | error | gave_up
     error: str
     cost: float
+    tokens: int
     calls: int
     models_used: list
     last_failed_sql: str
@@ -118,6 +119,7 @@ class Agent:
     def _call(self, s: Run) -> LLMReply:
         reply = self.llm.chat(s["messages"], tools=TOOLS, model=s["model"])
         s["cost"] += reply.cost_usd
+        s["tokens"] += reply.prompt_tokens + reply.completion_tokens
         s["calls"] += 1
         s["steps"] += 1
         if reply.model not in s["models_used"]:
@@ -235,7 +237,7 @@ class Agent:
                          {"role": "user", "content": user_message(question, evidence, schema)}],
             "steps": 0, "repairs": 0, "model": SMALL if self.routed else LARGE,
             "escalated": False, "final_sql": "", "status": "gave_up", "error": "",
-            "cost": 0.0, "calls": 0, "models_used": [], "columns": [], "rows": [],
+            "cost": 0.0, "tokens": 0, "calls": 0, "models_used": [], "columns": [], "rows": [],
         }
         self.emit({"type": "start", "model": s["model"]})
         out = self.graph.invoke(s, {"recursion_limit": 4 * MAX_STEPS + 20})
@@ -245,7 +247,7 @@ class Agent:
         if not out.get("final_sql") and out.get("last_failed_sql"):
             out["final_sql"] = out["last_failed_sql"]  # score the last attempt, not nothing
         self.emit({"type": "done", "status": out["status"], "sql": out.get("final_sql", ""),
-                   "cost": out["cost"]})
+                   "cost": out["cost"], "tokens": out["tokens"]})
         return out
 
 
@@ -256,6 +258,7 @@ def one_shot(llm, db: SafeDB, question: str, evidence: str = "",
                 {"role": "user", "content": user_message(question, evidence, schema)}]
     reply = llm.chat(messages, model=LARGE)
     return {"final_sql": extract_sql(reply.content), "cost": reply.cost_usd, "calls": 1,
+            "tokens": reply.prompt_tokens + reply.completion_tokens,
             "models_used": [reply.model], "escalated": False, "repairs": 0, "steps": 1,
             "status": "submitted"}
 

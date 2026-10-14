@@ -34,10 +34,12 @@ if not DB_PATH.exists():
     build(DB_PATH)
 db = SafeDB(DB_PATH)
 
-if os.getenv("MISTRAL_API_KEY"):
-    from .llm import MistralClient
-    llm, MODE = MistralClient(), "live"
-else:
+from .llm import LARGE, PROVIDER, SMALL, make_client
+
+try:
+    llm, MODE = make_client(), "live"
+except Exception as err:  # no Ollama running / no key: clearly labelled offline mode
+    print(f"[querypilot] Running offline: {err}")
     llm, MODE = offline_llm(), "offline"
 
 app = FastAPI(title="QueryPilot")
@@ -67,7 +69,8 @@ def index():
 @app.get("/api/info")
 def info():
     tables = [{"name": t, "columns": [c for c, _ in db.describe(t)]} for t in db.tables()]
-    return {"mode": MODE, "examples": EXAMPLES, "tables": tables}
+    return {"mode": MODE, "provider": PROVIDER, "models": [SMALL, LARGE],
+            "examples": EXAMPLES, "tables": tables}
 
 
 @app.get("/api/results")
@@ -95,10 +98,11 @@ def ask(body: Ask, request: Request):
             if out.get("rows") and MODE == "live":
                 answer = summarize(llm, question, out["columns"], out["rows"])
             elif MODE == "offline":
-                answer = "Offline mode: this is a placeholder run. Add a Mistral API key for real answers."
+                answer = "Offline mode: this is a placeholder run. Start Ollama for real answers."
             events.put({"type": "answer", "text": answer, "sql": out.get("final_sql", ""),
                         "columns": out.get("columns", []), "rows": out.get("rows", [])[:200],
                         "status": out.get("status"), "cost": round(out.get("cost", 0), 5),
+                        "tokens": out.get("tokens", 0),
                         "calls": out.get("calls", 0), "escalated": out.get("escalated", False),
                         "models": out.get("models_used", [])})
         except Exception as err:

@@ -59,7 +59,7 @@ def run_one(setup: str, llm, db: SafeDB, q: dict, schema: str, use_evidence: boo
             out = agent.run(q["question"], evidence, schema)
         api_error = ""
     except Exception as err:  # API failures are recorded, never dropped
-        out, api_error = {"final_sql": "", "cost": 0.0, "calls": 0, "models_used": [],
+        out, api_error = {"final_sql": "", "cost": 0.0, "tokens": 0, "calls": 0, "models_used": [],
                           "escalated": False, "repairs": 0}, f"{type(err).__name__}: {err}"
     latency = time.monotonic() - start
     s = score(db, out.get("final_sql", ""), q["SQL"])
@@ -69,7 +69,8 @@ def run_one(setup: str, llm, db: SafeDB, q: dict, schema: str, use_evidence: boo
         "question_id": q["question_id"], "db_id": q["db_id"], "difficulty": q["difficulty"],
         "question": q["question"], "evidence": evidence, "gold_sql": q["SQL"],
         "pred_sql": out.get("final_sql", ""), **s,
-        "cost_usd": round(out.get("cost", 0.0), 6), "latency_s": round(latency, 2),
+        "cost_usd": round(out.get("cost", 0.0), 6), "tokens": out.get("tokens", 0),
+        "latency_s": round(latency, 2),
         "llm_calls": out.get("calls", 0), "repairs": out.get("repairs", 0),
         "escalated": out.get("escalated", False), "models": out.get("models_used", []),
         "trace": [{k: v for k, v in e.items() if k != "output"} for e in trace],
@@ -101,6 +102,7 @@ def summarize(out_dir: Path, meta: dict) -> dict:
             "api_errors": sum(r["category"] == "api_error" for r in rows),
             "total_cost_usd": round(sum(r["cost_usd"] for r in rows), 4),
             "cost_per_question_usd": round(sum(r["cost_usd"] for r in rows) / n, 6),
+            "tokens_per_question": round(statistics.mean(r.get("tokens", 0) for r in rows)),
             "avg_latency_s": round(statistics.mean(lat), 2),
             "median_latency_s": round(statistics.median(lat), 2),
             "avg_llm_calls": round(statistics.mean(r["llm_calls"] for r in rows), 2),
@@ -119,11 +121,14 @@ def to_markdown(summary: dict) -> str:
              f"Run: {m.get('date', '?')} · evidence hints: {m.get('evidence', '?')} · "
              f"temperature 0 · timeout 30 s · scoring: official BIRD EX (set equality)",
              "",
-             "| Setup | Questions | EX | Cost / question | Avg latency | LLM calls | Escalated |",
-             "|---|---|---|---|---|---|---|"]
+             f"Models: {m.get('models', '?')} · provider: {m.get('provider', '?')}",
+             "",
+             "| Setup | Questions | EX | Tokens / question | Cost / question | Avg latency | LLM calls | Escalated |",
+             "|---|---|---|---|---|---|---|---|"]
     for name, s in summary["setups"].items():
-        lines.append(f"| {name} | {s['n']} | **{s['ex']}%** | ${s['cost_per_question_usd']:.4f} | "
-                     f"{s['avg_latency_s']} s | {s['avg_llm_calls']} | {s['escalation_rate']}% |")
+        lines.append(f"| {name} | {s['n']} | **{s['ex']}%** | {s.get('tokens_per_question', 0)} | "
+                     f"${s['cost_per_question_usd']:.4f} | {s['avg_latency_s']} s | {s['avg_llm_calls']} | "
+                     f"{s['escalation_rate']}% |")
     lines += ["", "## By difficulty", "", "| Setup | " + " | ".join(
         sorted({d for s in summary['setups'].values() for d in s['by_difficulty']})) + " |"]
     diffs = sorted({d for s in summary['setups'].values() for d in s['by_difficulty']})
@@ -164,10 +169,10 @@ def main(argv=None):
         from .demo import offline_llm
         llm = offline_llm()
     else:
-        from dotenv import load_dotenv
-        load_dotenv()
-        from .llm import MistralClient
-        llm = MistralClient()
+        from .llm import make_client
+        llm = make_client()
+    from .llm import LARGE, PROVIDER, SMALL
+    meta.update(provider="fake" if args.fake else PROVIDER, models=f"small={SMALL}, large={LARGE}")
 
     setups = [s.strip() for s in args.setups.split(",") if s.strip() in SETUPS]
     questions = load_questions(args.data, args.limit)
@@ -176,30 +181,39 @@ def main(argv=None):
     print(f"{len(questions)} questions · {len(todo)} still to run · setups: {', '.join(setups)}")
 
     dbs, schemas = {}, {}
-    spent, done, checked = 0.0, 0, False
-    for q in todo:
-        if q["db_id"] not in dbs:
-            dbs[q["db_id"]] = SafeDB(find_db(args.db_root, q["db_id"]))
-            schemas[q["db_id"]] = dbs[q["db_id"]].schema_context()
-        for setup in setups:
+    total = sum(1 for s_ in setups for q in todo if q["question_id"] not in finished[s_])
+    spent, done, checked, t0 = 0.0, 0, False, time.monotonic()
+    stop = False
+    # One setup at a time: on a small GPU this keeps a single model loaded
+    # instead of swapping models on every question.
+    for setup in setups:
+        if stop:
+            break
+        for q in todo:
             if q["question_id"] in finished[setup]:
                 continue
+            if q["db_id"] not in dbs:
+                dbs[q["db_id"]] = SafeDB(find_db(args.db_root, q["db_id"]))
+                schemas[q["db_id"]] = dbs[q["db_id"]].schema_context()
             rec = run_one(setup, llm, dbs[q["db_id"]], q, schemas[q["db_id"]], not args.no_evidence)
             with (args.out / f"{setup}.jsonl").open("a", encoding="utf-8") as f:
                 f.write(json.dumps(rec, default=str) + "\n")
             spent += rec["cost_usd"]
+            done += 1
             mark = "✓" if rec["correct"] else "✗"
-            print(f"[{done + 1}/{len(todo)}] {setup:8} {mark} {rec['category']:14} "
-                  f"${rec['cost_usd']:.4f} {rec['latency_s']}s  q{q['question_id']}")
-        done += 1
-        if done == 20 and not checked and len(todo) > 20:
-            checked = True
-            projected = spent / done * len(todo)
-            print(f"\nCost check: ${spent:.2f} spent on 20 questions → about ${projected:.2f} "
-                  f"for all {len(todo)}.")
-            if not args.yes and input("Continue? [y/N] ").strip().lower() != "y":
-                print("Stopped. Run the same command again later to resume.")
-                break
+            print(f"[{done}/{total}] {setup:8} {mark} {rec['category']:14} "
+                  f"{rec['tokens']:>6} tok  {rec['latency_s']}s  q{q['question_id']}")
+            if done == 20 and not checked and total > 20:
+                checked = True
+                hours = (time.monotonic() - t0) / done * total / 3600
+                msg = f"\nCheck: 20 runs done → about {hours:.1f} h for all {total} runs"
+                if spent > 0:
+                    msg += f", about ${spent / done * total:.2f}"
+                print(msg + " (the first setup is usually the fastest).")
+                if spent > 0 and not args.yes and input("Continue? [y/N] ").strip().lower() != "y":
+                    print("Stopped. Run the same command again later to resume.")
+                    stop = True
+                    break
     summary = summarize(args.out, meta)
     print("\n" + to_markdown(summary))
 

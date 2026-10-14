@@ -1,6 +1,7 @@
-"""LLM clients: the real Mistral API, and a scripted fake for tests and offline demos.
+"""LLM clients: local open-weight models through Ollama (default, free),
+the Mistral API (optional), and a scripted fake for tests and offline demos.
 
-Both expose the same `chat(messages, tools=None, model=...)` method and return
+All expose the same `chat(messages, tools=None, model=...)` method and return
 an `LLMReply`, so the agent never knows which one it's talking to.
 """
 
@@ -12,6 +13,13 @@ import time
 from dataclasses import dataclass, field
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
+
+PROVIDER = os.getenv("QP_PROVIDER", "ollama").lower()   # "ollama" or "mistral"
+OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
+NUM_CTX = int(os.getenv("QP_NUM_CTX", "16384"))  # BIRD schemas need a long context
 
 MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions"
 
@@ -24,8 +32,10 @@ PRICES = {
         float(os.getenv("PRICE_SMALL_IN", "0.1")), float(os.getenv("PRICE_SMALL_OUT", "0.3"))),
 }
 
-LARGE = os.getenv("QP_LARGE_MODEL", "mistral-large-latest")
-SMALL = os.getenv("QP_SMALL_MODEL", "mistral-small-latest")
+_DEFAULTS = {"ollama": ("qwen2.5-coder:7b", "qwen2.5-coder:3b"),
+             "mistral": ("mistral-large-latest", "mistral-small-latest")}
+LARGE = os.getenv("QP_LARGE_MODEL", _DEFAULTS.get(PROVIDER, _DEFAULTS["ollama"])[0])
+SMALL = os.getenv("QP_SMALL_MODEL", _DEFAULTS.get(PROVIDER, _DEFAULTS["ollama"])[1])
 
 
 @dataclass
@@ -50,7 +60,9 @@ class LLMReply:
 
 
 def cost_of(model_alias: str, prompt_tokens: int, completion_tokens: int) -> float:
-    p_in, p_out = PRICES.get(model_alias, PRICES[LARGE] if LARGE in PRICES else (0.5, 1.5))
+    if model_alias not in PRICES:
+        return 0.0  # local models cost nothing per call
+    p_in, p_out = PRICES[model_alias]
     return (prompt_tokens * p_in + completion_tokens * p_out) / 1_000_000
 
 
@@ -94,6 +106,75 @@ class MistralClient:
             model=data.get("model", model), prompt_tokens=pt, completion_tokens=ct,
             cost_usd=cost_of(model, pt, ct), latency_s=time.monotonic() - start,
         )
+
+
+class OllamaClient:
+    """Local models through Ollama's native chat API (supports tool calling).
+    Uses /api/chat rather than the OpenAI-compatible endpoint so the context
+    window can be set: Ollama's default is too short for BIRD schemas and
+    would silently cut the prompt."""
+
+    def __init__(self, url: str = OLLAMA_URL, num_ctx: int = NUM_CTX):
+        self.url, self.num_ctx = url.rstrip("/"), num_ctx
+        try:
+            requests.get(f"{self.url}/api/tags", timeout=5).raise_for_status()
+        except requests.RequestException as err:
+            raise RuntimeError("Ollama is not reachable. Is the Ollama app running?") from err
+
+    @staticmethod
+    def _convert(messages: list[dict]) -> list[dict]:
+        """OpenAI-style history -> Ollama format (arguments as objects, tool names on results)."""
+        out, names = [], {}
+        for m in messages:
+            m = dict(m)
+            if m.get("tool_calls"):
+                calls = []
+                for c in m["tool_calls"]:
+                    args = c["function"]["arguments"]
+                    names[c.get("id")] = c["function"]["name"]
+                    calls.append({"function": {"name": c["function"]["name"],
+                                               "arguments": json.loads(args) if isinstance(args, str) else args}})
+                m["tool_calls"] = calls
+            if m["role"] == "tool":
+                m = {"role": "tool", "content": m["content"],
+                     "tool_name": m.get("name") or names.get(m.get("tool_call_id"), "")}
+            out.append(m)
+        return out
+
+    def chat(self, messages: list[dict], tools: list[dict] | None = None,
+             model: str = LARGE, temperature: float = 0.0) -> LLMReply:
+        body = {"model": model, "messages": self._convert(messages), "stream": False,
+                "options": {"temperature": temperature, "num_ctx": self.num_ctx, "seed": 0}}
+        if tools:
+            body["tools"] = tools
+        start = time.monotonic()
+        resp = requests.post(f"{self.url}/api/chat", json=body, timeout=600)
+        if resp.status_code == 404:
+            raise RuntimeError(f"Model '{model}' is not installed. Run: ollama pull {model}")
+        resp.raise_for_status()
+        data = resp.json()
+        msg = data.get("message", {})
+        calls = []
+        for i, c in enumerate(msg.get("tool_calls") or []):
+            fn = c.get("function", {})
+            args = fn.get("arguments") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {"_raw": args}
+            calls.append({"id": f"call_{i}_{int(time.time() * 1000) % 100000}",
+                          "name": fn.get("name", ""), "arguments": args})
+        return LLMReply(
+            content=msg.get("content") or "", tool_calls=calls, model=data.get("model", model),
+            prompt_tokens=data.get("prompt_eval_count", 0), completion_tokens=data.get("eval_count", 0),
+            cost_usd=0.0, latency_s=time.monotonic() - start,
+        )
+
+
+def make_client():
+    """The configured real model: local Ollama by default, Mistral if QP_PROVIDER=mistral."""
+    return MistralClient() if PROVIDER == "mistral" else OllamaClient()
 
 
 class FakeLLM:
