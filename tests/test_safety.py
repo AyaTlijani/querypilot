@@ -1,0 +1,70 @@
+import hashlib
+
+import pytest
+
+from querypilot.safe_db import SafeDB, UnsafeQueryError, QueryTimeoutError
+
+ATTACKS = [
+    "DELETE FROM customers",
+    "DROP TABLE customers",
+    "UPDATE customers SET name = 'x'",
+    "INSERT INTO customers VALUES (9,'x','y')",
+    "CREATE TABLE evil (a)",
+    "ALTER TABLE customers ADD COLUMN x",
+    "ATTACH DATABASE 'other.db' AS other",
+    "PRAGMA writable_schema = 1",
+    "PRAGMA query_only = OFF",
+    "SELECT 1; DROP TABLE customers",
+    "SELECT 1; DELETE FROM customers",
+    "SELECT * FROM customers; -- harmless?\nDELETE FROM customers",
+    "/* hi */ DELETE FROM customers",
+    "WITH x AS (SELECT 1) DELETE FROM customers",
+    "REPLACE INTO customers VALUES (1,'x','y')",
+    "VACUUM",
+    "",
+]
+
+
+def digest(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("sql", ATTACKS)
+def test_writes_are_blocked_and_file_unchanged(shop, sql):
+    db = SafeDB(shop["db"])
+    before = digest(shop["db"])
+    with pytest.raises((UnsafeQueryError, Exception)):
+        db.query(sql)
+    assert digest(shop["db"]) == before
+    assert db.query("SELECT COUNT(*) FROM customers").rows == [(3,)]
+
+
+def test_engine_blocks_writes_even_without_text_check(shop):
+    """The SQL text check is only one layer: the engine refuses on its own."""
+    db = SafeDB(shop["db"])
+    before = digest(shop["db"])
+    for sql in ("DELETE FROM customers", "DROP TABLE orders", "ATTACH 'x.db' AS y"):
+        with pytest.raises(Exception):
+            db.query(sql, checked=False)
+    assert digest(shop["db"]) == before
+
+
+def test_reads_work(shop):
+    db = SafeDB(shop["db"])
+    assert db.tables() == ["customers", "orders"]
+    assert ("country", "TEXT") in db.describe("customers")
+    res = db.query("WITH f AS (SELECT * FROM customers WHERE country='France') SELECT COUNT(*) FROM f")
+    assert res.rows == [(2,)]
+
+
+def test_timeout(shop):
+    db = SafeDB(shop["db"])
+    with pytest.raises(QueryTimeoutError):
+        db.query("WITH RECURSIVE c(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM c) "
+                 "SELECT COUNT(*) FROM c", timeout_s=0.5)
+
+
+def test_row_cap(shop):
+    db = SafeDB(shop["db"])
+    res = db.query("SELECT * FROM orders", max_rows=2)
+    assert len(res.rows) == 2 and res.truncated
