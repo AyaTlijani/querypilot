@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QueryPilot — data analyst agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+<script src="/vendor/chart.umd.js"></script>
+<style>
+:root{
+  --bg:#f5f4ff;--surface:#fff;--ink:#17152a;--muted:#69677c;
+  --purple:#dcd3ff;--purple-d:#9c8ae6;--blue:#c9ddff;--sky:#dff1ff;--pink:#ffd8e9;
+  --green:#4cae7d;--red:#d9534f;--amber:#e3a33b;
+  --display:"Space Grotesk",sans-serif;--mono:"DM Mono",monospace;--body:"Inter",sans-serif;
+}
+*{box-sizing:border-box}
+body{margin:0;color:var(--ink);font-family:var(--body);line-height:1.55;
+  background:linear-gradient(rgba(23,21,42,.045) 1px,transparent 1px),
+  linear-gradient(90deg,rgba(23,21,42,.045) 1px,transparent 1px),var(--bg);background-size:28px 28px}
+button,input{font:inherit;color:inherit}
+h1,h2,h3{font-family:var(--display);line-height:1.05;margin:0}
+.mono{font-family:var(--mono)}
+
+/* taskbar */
+.bar{position:sticky;top:0;z-index:10;height:60px;border-bottom:2px solid var(--ink);
+  background:rgba(255,255,255,.92);backdrop-filter:blur(10px)}
+.bar-in{max-width:1240px;margin:auto;height:100%;padding:0 22px;display:flex;align-items:center;gap:22px}
+.logo{font:500 13px var(--mono);display:flex;align-items:center;gap:8px}
+.logo i{font-style:normal;display:inline-grid;place-items:center;width:20px;height:20px;
+  background:var(--purple);border:1.5px solid var(--ink)}
+.tabs{display:flex;gap:4px;margin-left:auto}
+.tab{border:1px solid transparent;background:none;padding:7px 12px;font:11px var(--mono);cursor:pointer}
+.tab.on{background:var(--purple);border-color:var(--ink)}
+.badge{font:10px var(--mono);padding:4px 9px;border:1.5px solid var(--ink);background:var(--sky);white-space:nowrap}
+.badge.off{background:var(--pink)}
+.gh{font:11px var(--mono);text-decoration:none;color:var(--ink)}
+
+main{max-width:1240px;margin:auto;padding:34px 22px 70px}
+.hero{display:flex;justify-content:space-between;align-items:end;gap:20px;margin-bottom:26px;flex-wrap:wrap}
+.eyebrow{font:10px var(--mono);letter-spacing:.12em;color:#6956b4;text-transform:uppercase;margin:0 0 8px}
+.hero h1{font-size:clamp(2.2rem,5vw,3.6rem);letter-spacing:-.05em}
+.hero h1 span{color:#8875d9;text-shadow:3px 3px 0 var(--ink)}
+.hero p{max-width:52ch;color:var(--muted);margin:10px 0 0}
+
+/* windows */
+.win{background:var(--surface);border:2px solid var(--ink);box-shadow:7px 7px var(--ink);min-width:0}
+.wh{height:34px;display:flex;align-items:center;gap:9px;padding:0 10px;border-bottom:2px solid var(--ink);
+  font:10px var(--mono);background:var(--purple)}
+.wh.blue{background:var(--blue)}.wh.sky{background:var(--sky)}.wh.pink{background:var(--pink)}
+.dots{display:flex;gap:4px}.dots b{width:11px;height:11px;border:1px solid var(--ink);border-radius:2px;background:#fff}
+.dots b:first-child{background:var(--pink)}.dots b:nth-child(2){background:var(--sky)}.dots b:last-child{background:var(--purple-d)}
+.wh .right{margin-left:auto;opacity:.75}
+.wb{padding:18px}
+
+.grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:26px;align-items:start}
+.stack{display:grid;gap:26px}
+
+/* ask */
+form.ask{display:flex;gap:10px}
+form.ask input{flex:1;min-width:0;padding:13px 14px;border:2px solid var(--ink);background:#fbfaff;outline:none}
+form.ask input:focus{background:#fff;box-shadow:inset 0 0 0 2px var(--purple)}
+.btn{padding:11px 18px;border:2px solid var(--ink);box-shadow:4px 4px var(--ink);background:#9c8ae6;color:#fff;
+  font:11px var(--mono);cursor:pointer;transition:.12s;white-space:nowrap}
+.btn:hover{transform:translate(3px,3px);box-shadow:1px 1px var(--ink)}
+.btn:disabled{opacity:.6;cursor:wait;transform:none;box-shadow:4px 4px var(--ink)}
+.chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}
+.chip{border:1px solid var(--ink);background:#fff;padding:5px 9px;font:10px var(--mono);cursor:pointer;text-align:left}
+.chip:hover{background:var(--sky)}
+.schema{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}
+.tbl{border:1.5px solid var(--ink);background:#fbfaff}
+.tbl h4{margin:0;padding:6px 9px;font:500 11px var(--mono);border-bottom:1.5px solid var(--ink);background:var(--sky)}
+.tbl p{margin:0;padding:7px 9px;font:10px/1.7 var(--mono);color:var(--muted)}
+
+/* trace */
+.trace{list-style:none;margin:0;padding:0;font:11px/1.6 var(--mono);max-height:520px;overflow:auto}
+.trace li{display:grid;grid-template-columns:22px 1fr;gap:8px;padding:9px 0;border-bottom:1px dashed rgba(23,21,42,.18);
+  animation:in .25s ease}
+.trace li:last-child{border-bottom:0}
+.trace .ic{width:20px;height:20px;display:grid;place-items:center;border:1.5px solid var(--ink);font-size:10px;background:#fff}
+.trace .k{font-weight:500}
+.trace pre{margin:6px 0 0;padding:8px;background:#f6f4ff;border:1px solid rgba(23,21,42,.15);white-space:pre-wrap;word-break:break-word;
+  max-height:150px;overflow:auto;font:10.5px/1.5 var(--mono)}
+.ic.tool{background:var(--sky)}.ic.ok{background:#d6f3e3}.ic.bad{background:#ffd9d6}.ic.up{background:#fff0cf}.ic.sub{background:var(--purple)}
+.empty{color:var(--muted);font:11px var(--mono);padding:26px 4px;text-align:center}
+@keyframes in{from{opacity:0;transform:translateY(4px)}}
+.pulse{display:inline-block;width:8px;height:8px;background:var(--green);border-radius:50%;margin-right:6px;animation:p 1s infinite}
+@keyframes p{50%{opacity:.25}}
+
+/* answer */
+.answer{font-size:17px;font-family:var(--display);font-weight:500;margin:0 0 14px;letter-spacing:-.01em}
+.stats{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
+.stat{font:10px var(--mono);border:1px solid var(--ink);padding:3px 8px;background:#fff}
+.stat.ok{background:#d6f3e3}.stat.bad{background:#ffd9d6}.stat.up{background:#fff0cf}
+.result{max-height:260px;overflow:auto;border:1.5px solid var(--ink);margin-bottom:14px}
+table{border-collapse:collapse;width:100%;font:11px var(--mono)}
+th,td{padding:6px 9px;border-bottom:1px solid rgba(23,21,42,.12);text-align:left;white-space:nowrap}
+th{position:sticky;top:0;background:var(--sky);border-bottom:1.5px solid var(--ink)}
+.chartbox{border:1.5px solid var(--ink);padding:10px;margin-bottom:14px;background:#fff}
+.sql{position:relative}
+.sql pre{margin:0;padding:12px;background:#17152a;color:#e9e5ff;font:11px/1.6 var(--mono);white-space:pre-wrap;word-break:break-word}
+.copy{position:absolute;top:8px;right:8px;font:10px var(--mono);background:#fff;border:1px solid var(--ink);padding:3px 7px;cursor:pointer}
+
+/* benchmark */
+.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:22px;margin-bottom:26px}
+.card{padding:18px;border:2px solid var(--ink);box-shadow:6px 6px var(--ink);background:#eeeaff}
+.card:nth-child(2){background:#e4efff}.card:nth-child(3){background:#e8f7ff}
+.card h3{font-size:15px;margin-bottom:10px}
+.card .ex{font:700 46px var(--display);letter-spacing:-.04em}
+.card dl{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin:10px 0 0;font:10.5px var(--mono)}
+.card dt{color:var(--muted)}.card dd{margin:0}
+.note{font-size:13px;color:var(--muted)}
+.note b{color:var(--ink)}
+.cats{display:grid;gap:10px}
+.catrow{display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;font:10.5px var(--mono)}
+.catbar{display:flex;height:18px;border:1.5px solid var(--ink);overflow:hidden}
+.catbar span{height:100%}
+.legend{display:flex;flex-wrap:wrap;gap:10px;font:10px var(--mono);margin-top:10px}
+.legend i{display:inline-block;width:10px;height:10px;border:1px solid var(--ink);margin-right:5px;vertical-align:-1px}
+footer{text-align:center;font:10px var(--mono);color:var(--muted);padding:20px}
+[hidden]{display:none!important}
+
+@media(max-width:900px){.grid{grid-template-columns:1fr}.cards{grid-template-columns:1fr}
+  .bar-in{gap:10px;padding:0 14px}.gh,.badge{display:none}form.ask{flex-direction:column}
+  main{padding:26px 14px 60px}.win{box-shadow:5px 5px var(--ink)}}
+</style>
+</head>
+<body>
+
+<header class="bar"><div class="bar-in">
+  <div class="logo"><i>◆</i>querypilot.exe</div>
+  <nav class="tabs">
+    <button class="tab on" data-tab="ask">ask</button>
+    <button class="tab" data-tab="bench">benchmark</button>
+  </nav>
+  <span id="mode" class="badge">…</span>
+  <a class="gh" href="https://github.com/AyaTlijani/querypilot" target="_blank" rel="noopener">GitHub ↗</a>
+</div></header>
+
+<main>
+
+<!-- ============ ASK ============ -->
+<section id="ask">
+  <div class="hero">
+    <div>
+      <p class="eyebrow">Autonomous data analyst agent</p>
+      <h1>Ask your data.<br><span>Watch it think.</span></h1>
+      <p>QueryPilot explores the database, writes SQL, checks its own results and repairs its mistakes — every step visible, every query read-only.</p>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="stack">
+      <div class="win">
+        <div class="wh"><span class="dots"><b></b><b></b><b></b></span>ask.exe<span class="right">demo db: european online shop</span></div>
+        <div class="wb">
+          <form class="ask" id="askform">
+            <input id="q" autocomplete="off" placeholder="e.g. Which carriers deliver late most often?" maxlength="500">
+            <button class="btn" id="go">run agent ↗</button>
+          </form>
+          <div class="chips" id="examples"></div>
+        </div>
+      </div>
+
+      <div class="win" id="answerwin" hidden>
+        <div class="wh pink"><span class="dots"><b></b><b></b><b></b></span>answer.txt<span class="right" id="answermeta"></span></div>
+        <div class="wb">
+          <p class="answer" id="answer"></p>
+          <div class="stats" id="stats"></div>
+          <div class="chartbox" id="chartbox" hidden><div style="position:relative;height:210px"><canvas id="chart"></canvas></div></div>
+          <div class="result" id="result"></div>
+          <div class="sql"><pre id="sql"></pre><button class="copy" id="copy">copy</button></div>
+        </div>
+      </div>
+
+      <div class="win">
+        <div class="wh sky"><span class="dots"><b></b><b></b><b></b></span>schema.db<span class="right">read-only</span></div>
+        <div class="wb"><div class="schema" id="schema"></div></div>
+      </div>
+    </div>
+
+    <div class="win">
+      <div class="wh blue"><span class="dots"><b></b><b></b><b></b></span>agent_trace.log<span class="right" id="tracestate">idle</span></div>
+      <div class="wb">
+        <ul class="trace" id="trace"><li class="empty" style="display:block">Ask a question to see the agent explore, test, fail, repair and answer.</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ BENCHMARK ============ -->
+<section id="bench" hidden>
+  <div class="hero">
+    <div>
+      <p class="eyebrow">Evaluation · BIRD Mini-Dev (SQLite)</p>
+      <h1>Measured, <span>not claimed.</span></h1>
+      <p>Three setups answer the same questions with the same schema, hints and model family. Scored with BIRD's official execution-accuracy rule. Separate from the demo database.</p>
+    </div>
+  </div>
+
+  <div id="nores" class="win" hidden>
+    <div class="wh"><span class="dots"><b></b><b></b><b></b></span>results.json</div>
+    <div class="wb"><p class="empty">No benchmark results yet.<br><br>Run <span class="mono">python -m querypilot.evaluate</span> to fill this page.</p></div>
+  </div>
+
+  <div id="res" hidden>
+    <div class="cards" id="cards"></div>
+    <div class="grid">
+      <div class="win">
+        <div class="wh"><span class="dots"><b></b><b></b><b></b></span>accuracy_by_difficulty.png</div>
+        <div class="wb"><div style="position:relative;height:280px"><canvas id="diffchart"></canvas></div></div>
+      </div>
+      <div class="win">
+        <div class="wh sky"><span class="dots"><b></b><b></b><b></b></span>failures.log<span class="right">every question counted</span></div>
+        <div class="wb"><div class="cats" id="cats"></div><div class="legend" id="catlegend"></div></div>
+      </div>
+    </div>
+    <div class="win" style="margin-top:26px">
+      <div class="wh pink"><span class="dots"><b></b><b></b><b></b></span>method.md</div>
+      <div class="wb note" id="method"></div>
+    </div>
+  </div>
+</section>
+</main>
+<footer>QueryPilot · LangGraph · Mistral · MCP · read-only SQLite sandbox</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let chart, diffChart;
+if (typeof Chart !== "undefined") {
+  Chart.defaults.font.family = "DM Mono, monospace"; Chart.defaults.font.size = 10;
+  Chart.defaults.color = "#17152a"; Chart.defaults.maintainAspectRatio = false; Chart.defaults.animation = false;
+}
+
+/* tabs */
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === t));
+  $("#ask").hidden = t.dataset.tab !== "ask";
+  $("#bench").hidden = t.dataset.tab !== "bench";
+  if (t.dataset.tab === "bench") loadResults();
+});
+
+/* info */
+fetch("/api/info").then(r => r.json()).then(info => {
+  const m = $("#mode");
+  m.textContent = info.mode === "live" ? "● live · mistral" : "● offline demo";
+  m.classList.toggle("off", info.mode !== "live");
+  $("#examples").innerHTML = info.examples.map(e => `<button class="chip">${esc(e)}</button>`).join("");
+  $("#examples").querySelectorAll(".chip").forEach(c => c.onclick = () => { $("#q").value = c.textContent; run(); });
+  $("#schema").innerHTML = info.tables.map(t =>
+    `<div class="tbl"><h4>${esc(t.name)}</h4><p>${t.columns.map(esc).join("<br>")}</p></div>`).join("");
+});
+
+/* trace rendering */
+const ICON = {start:["▶",""], thought:["…",""], tool:["⚙","tool"], submit:["⇢","sub"],
+              verify:["✓","ok"], repair:["↺","bad"], escalate:["⇧","up"], done:["■","ok"]};
+function addStep(e) {
+  const li = document.createElement("li");
+  let [ic, cls] = ICON[e.type] || ["·", ""];
+  let body = "";
+  if (e.type === "start") body = `<span class="k">start</span> · model ${esc(e.model)}`;
+  else if (e.type === "thought") body = `<span class="k">thinking</span><br>${esc(e.text)}`;
+  else if (e.type === "tool") {
+    if (!e.ok) cls = "bad";
+    const arg = e.args && (e.args.sql || e.args.table) ? esc(e.args.sql || e.args.table) : "";
+    body = `<span class="k">${esc(e.name)}</span> ${arg && e.name !== "run_sql" ? arg : ""}` +
+      (e.name === "run_sql" ? `<pre>${arg}</pre>` : "") + `<pre>${esc(e.output)}</pre>`;
+  }
+  else if (e.type === "submit") body = `<span class="k">submit final query</span><pre>${esc(e.sql)}</pre>`;
+  else if (e.type === "verify") {
+    if (e.status !== "ok") { cls = e.status === "empty" ? "up" : "bad"; ic = e.status === "empty" ? "∅" : "✗"; }
+    body = `<span class="k">verify</span> · ${e.status === "ok" ? e.rows + " rows ✓" : e.status === "empty" ? "0 rows — suspicious" : "failed: " + esc(e.error)}`;
+  }
+  else if (e.type === "repair") body = `<span class="k">self-repair #${e.attempt}</span><br>${esc(e.reason)}`;
+  else if (e.type === "escalate") body = `<span class="k">escalate → ${esc(e.model)}</span><br>${esc(e.reason)}`;
+  else if (e.type === "done") body = `<span class="k">done</span> · ${esc(e.status)} · $${(+e.cost).toFixed(4)}`;
+  else return;
+  li.innerHTML = `<span class="ic ${cls}">${ic}</span><div>${body}</div>`;
+  $("#trace").appendChild(li);
+  $("#trace").scrollTop = $("#trace").scrollHeight;
+}
+
+/* answer rendering */
+function showAnswer(a) {
+  $("#answerwin").hidden = false;
+  $("#answer").textContent = a.text || (a.status === "ok" ? "Here is what the data says:" : "The agent could not produce a valid answer.");
+  const st = [`<span class="stat ${a.status === "ok" ? "ok" : "bad"}">${esc(a.status)}</span>`,
+    `<span class="stat">${a.rows.length} rows</span>`, `<span class="stat">${a.calls} llm calls</span>`,
+    `<span class="stat">$${(+a.cost).toFixed(4)}</span>`];
+  if (a.escalated) st.push(`<span class="stat up">escalated to large model</span>`);
+  $("#stats").innerHTML = st.join("");
+  $("#answermeta").textContent = (a.models || []).join(", ");
+  $("#sql").textContent = a.sql || "-- no query";
+  $("#result").innerHTML = a.columns.length ? `<table><thead><tr>${a.columns.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>
+    <tbody>${a.rows.map(r => `<tr>${r.map(v => `<td>${esc(typeof v === "number" ? +v.toFixed(2) : v)}</td>`).join("")}</tr>`).join("")}</tbody></table>` : "";
+  drawChart(a);
+}
+function drawChart(a) {
+  if (chart) chart.destroy();
+  const numIdx = a.columns.findIndex((c, i) => i > 0 && a.rows.length && a.rows.every(r => typeof r[i] === "number"));
+  const ok = a.rows.length >= 2 && a.rows.length <= 40 && numIdx > 0 && typeof Chart !== "undefined";
+  $("#chartbox").hidden = !ok;
+  if (!ok) return;
+  const isTime = /^\d{4}-\d{2}/.test(String(a.rows[0][0]));
+  chart = new Chart($("#chart"), {
+    type: isTime ? "line" : "bar",
+    data: {labels: a.rows.map(r => r[0]), datasets: [{label: a.columns[numIdx], data: a.rows.map(r => r[numIdx]),
+      backgroundColor: "#9c8ae6", borderColor: "#17152a", borderWidth: 1.5, tension: .25}]},
+    options: {plugins: {legend: {display: false}}, scales: {x: {ticks: {font: {family: "DM Mono", size: 10}}},
+      y: {ticks: {font: {family: "DM Mono", size: 10}}}}}
+  });
+}
+
+/* run */
+async function run() {
+  const q = $("#q").value.trim();
+  if (!q) return;
+  $("#go").disabled = true;
+  $("#trace").innerHTML = "";
+  $("#answerwin").hidden = true;
+  $("#tracestate").innerHTML = `<span class="pulse"></span>running`;
+  try {
+    const res = await fetch("/api/ask", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({question: q})});
+    if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || res.statusText); }
+    const reader = res.body.getReader(), dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      const parts = buf.split("\n\n"); buf = parts.pop();
+      for (const p of parts) {
+        if (!p.startsWith("data: ")) continue;
+        const e = JSON.parse(p.slice(6));
+        if (e.type === "answer") showAnswer(e);
+        else if (e.type === "error") throw new Error(e.text);
+        else addStep(e);
+      }
+    }
+    $("#tracestate").textContent = "finished";
+  } catch (err) {
+    $("#tracestate").textContent = "error";
+    $("#trace").insertAdjacentHTML("beforeend", `<li><span class="ic bad">!</span><div>${esc(err.message)}</div></li>`);
+  } finally { $("#go").disabled = false; }
+}
+$("#askform").onsubmit = e => { e.preventDefault(); run(); };
+$("#copy").onclick = () => { navigator.clipboard?.writeText($("#sql").textContent); $("#copy").textContent = "copied"; setTimeout(() => $("#copy").textContent = "copy", 1200); };
+
+/* benchmark */
+const NAMES = {one_shot: "One-shot LLM", agent: "Agent (large model)", routed: "Agent + routing"};
+const CAT_COLORS = {correct: "#4cae7d", wrong_logic: "#9c8ae6", wrong_tables: "#8eb5ed", wrong_columns: "#c9ddff",
+  empty_result: "#ffd8e9", sql_error: "#ee9ec5", timeout: "#e3a33b", blocked: "#17152a", no_sql: "#69677c",
+  api_error: "#d9534f", gold_failed: "#aaa"};
+let loaded = false;
+async function loadResults() {
+  if (loaded) return;
+  const data = await fetch("/api/results").then(r => r.json());
+  const setups = Object.entries(data.setups || {});
+  $("#nores").hidden = setups.length > 0; $("#res").hidden = setups.length === 0;
+  if (!setups.length) return;
+  loaded = true;
+  $("#cards").innerHTML = setups.map(([k, s]) => `<div class="card"><h3>${NAMES[k] || k}</h3>
+    <div class="ex">${s.ex}%</div><span class="mono" style="font-size:10px">execution accuracy · ${s.n} questions</span>
+    <dl><dt>cost / question</dt><dd>$${s.cost_per_question_usd.toFixed(4)}</dd>
+    <dt>avg latency</dt><dd>${s.avg_latency_s} s</dd><dt>llm calls</dt><dd>${s.avg_llm_calls}</dd>
+    <dt>escalated</dt><dd>${s.escalation_rate}%</dd><dt>near-misses*</dt><dd>${s.near_misses_not_counted}</dd></dl></div>`).join("");
+  const diffs = [...new Set(setups.flatMap(([, s]) => Object.keys(s.by_difficulty)))];
+  const order = ["simple", "moderate", "challenging"]; diffs.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+  if (diffChart) diffChart.destroy();
+  if (typeof Chart !== "undefined") diffChart = new Chart($("#diffchart"), {type: "bar",
+    data: {labels: diffs, datasets: setups.map(([k, s], i) => ({label: NAMES[k] || k,
+      data: diffs.map(d => s.by_difficulty[d]?.ex ?? 0), backgroundColor: ["#dcd3ff", "#9c8ae6", "#8eb5ed"][i % 3],
+      borderColor: "#17152a", borderWidth: 1.5}))},
+    options: {scales: {y: {beginAtZero: true, max: 100, ticks: {callback: v => v + "%"}}},
+      plugins: {legend: {labels: {font: {family: "DM Mono", size: 10}}}}}});
+  const allCats = new Set();
+  $("#cats").innerHTML = setups.map(([k, s]) => {
+    const segs = Object.entries(s.categories).map(([c, n]) => { allCats.add(c);
+      return `<span title="${c}: ${n}" style="width:${100 * n / s.n}%;background:${CAT_COLORS[c] || "#ccc"}"></span>`; }).join("");
+    return `<div class="catrow"><span>${NAMES[k] || k}</span><div class="catbar">${segs}</div></div>`;
+  }).join("");
+  $("#catlegend").innerHTML = [...allCats].map(c => `<span><i style="background:${CAT_COLORS[c] || "#ccc"}"></i>${c.replace("_", " ")}</span>`).join("");
+  const m = data.meta || {};
+  $("#method").innerHTML = `<b>Scoring.</b> A prediction is correct when its result has the same set of rows as the reference query (BIRD's official rule: row order and duplicates ignored). Errors, blocked queries and timeouts (30 s) count as wrong.
+    <b>Fairness.</b> All setups get the same questions, database, schema text${m.evidence ? " and evidence hints" : ""}; one-shot and agent use the same large model; temperature 0.
+    <b>Transparency.</b> API failures count as wrong. *Near-misses (right rows with extra columns or rounding) are shown but never counted as correct.
+    Run: ${esc(m.date || "?")} · models: ${esc([...new Set(setups.flatMap(([, s]) => s.models))].join(", "))}.`;
+}
+</script>
+</body>
+</html>

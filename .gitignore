@@ -3,5 +3,4 @@ __pycache__/
 .env
 .venv/
 data/
-results/*.jsonl
 .pytest_cache/

@@ -16,6 +16,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from .agent import Agent, summarize
@@ -40,6 +41,7 @@ else:
     llm, MODE = offline_llm(), "offline"
 
 app = FastAPI(title="QueryPilot")
+app.mount("/vendor", StaticFiles(directory=WEB / "vendor"), name="vendor")
 _hits: dict[str, deque] = defaultdict(deque)
 
 
