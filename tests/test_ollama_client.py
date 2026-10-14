@@ -10,6 +10,7 @@ from querypilot.safe_db import SafeDB
 class Resp:
     def __init__(self, data, status=200):
         self._data, self.status_code = data, status
+        self.text = str(data)
 
     def json(self):
         return self._data

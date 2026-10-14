@@ -151,6 +151,9 @@ class OllamaClient:
         resp = requests.post(f"{self.url}/api/chat", json=body, timeout=600)
         if resp.status_code == 404:
             raise RuntimeError(f"Model '{model}' is not installed. Run: ollama pull {model}")
+        if resp.status_code == 400 and "support tools" in resp.text:
+            raise RuntimeError(f"Model '{model}' can't use tools in Ollama. "
+                               "Pick a tool-capable model (e.g. qwen2.5-coder) in .env.")
         resp.raise_for_status()
         data = resp.json()
         msg = data.get("message", {})
