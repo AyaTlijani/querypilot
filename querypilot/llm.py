@@ -59,6 +59,36 @@ class LLMReply:
         return msg
 
 
+_TOOL_NAMES = {"list_tables", "describe_table", "sample_rows", "run_sql", "submit_sql"}
+
+
+def parse_text_tool_calls(text: str) -> list[dict]:
+    """Small local models often write a tool call as JSON text, e.g.
+    ```json {"name": "run_sql", "arguments": {"sql": "..."}} ``` or inside
+    <tool_call> tags, instead of using the structured tool-call field.
+    Recover those calls so the agent loop works the same for every model."""
+    if not text or '"name"' not in text:
+        return []
+    decoder, calls, i = json.JSONDecoder(), [], 0
+    while (i := text.find("{", i)) != -1:
+        try:
+            obj, end = decoder.raw_decode(text, i)
+        except json.JSONDecodeError:
+            i += 1
+            continue
+        if isinstance(obj, dict) and obj.get("name") in _TOOL_NAMES:
+            args = obj.get("arguments", obj.get("parameters", {}))
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {}
+            calls.append({"id": f"text_call_{len(calls)}", "name": obj["name"],
+                          "arguments": args if isinstance(args, dict) else {}})
+        i = end
+    return calls
+
+
 def cost_of(model_alias: str, prompt_tokens: int, completion_tokens: int) -> float:
     if model_alias not in PRICES:
         return 0.0  # local models cost nothing per call
@@ -168,8 +198,13 @@ class OllamaClient:
                     args = {"_raw": args}
             calls.append({"id": f"call_{i}_{int(time.time() * 1000) % 100000}",
                           "name": fn.get("name", ""), "arguments": args})
+        content = msg.get("content") or ""
+        if not calls and tools:
+            calls = parse_text_tool_calls(content)
+            if calls:
+                content = ""  # the text WAS the tool call, not a thought
         return LLMReply(
-            content=msg.get("content") or "", tool_calls=calls, model=data.get("model", model),
+            content=content, tool_calls=calls, model=data.get("model", model),
             prompt_tokens=data.get("prompt_eval_count", 0), completion_tokens=data.get("eval_count", 0),
             cost_usd=0.0, latency_s=time.monotonic() - start,
         )
