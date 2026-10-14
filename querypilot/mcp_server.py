@@ -10,7 +10,10 @@ from __future__ import annotations
 
 import os
 
-from mcp.server.fastmcp import FastMCP
+try:  # MCP Python SDK 2.x
+    from mcp.server.mcpserver import MCPServer as FastMCP
+except ImportError:  # 1.x
+    from mcp.server.fastmcp import FastMCP
 
 from .agent import _table
 from .safe_db import SafeDB
