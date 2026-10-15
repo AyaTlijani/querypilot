@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from .agent import Agent, summarize
 from .demo import DEMO_PATH, EXAMPLES, build, offline_llm
 from .safe_db import SafeDB
+from .uploads import UploadError, build_database, path_for, suggest_questions
 
 load_dotenv()
 ROOT = Path(__file__).resolve().parent.parent
@@ -49,6 +50,24 @@ _hits: dict[str, deque] = defaultdict(deque)
 
 class Ask(BaseModel):
     question: str
+    db_id: str | None = None   # an uploaded dataset; the demo shop when empty
+
+
+_upload_hits: dict[str, deque] = defaultdict(deque)
+UPLOAD_LIMIT = int(os.getenv("QP_UPLOADS_PER_HOUR", "10"))
+
+
+def _db_for(db_id: str | None) -> SafeDB:
+    if not db_id:
+        return db
+    path = path_for(db_id)
+    if path is None:
+        raise HTTPException(404, "That dataset has expired. Please upload the file again.")
+    return SafeDB(path)
+
+
+def _tables(target: SafeDB) -> list[dict]:
+    return [{"name": t, "columns": [c for c, _ in target.describe(t)]} for t in target.tables()]
 
 
 def _allowed(ip: str) -> bool:
@@ -68,7 +87,7 @@ def index():
 
 @app.get("/api/info")
 def info():
-    tables = [{"name": t, "columns": [c for c, _ in db.describe(t)]} for t in db.tables()]
+    tables = _tables(db)
     return {"mode": MODE, "provider": PROVIDER, "models": [SMALL, LARGE],
             "examples": EXAMPLES, "tables": tables}
 
@@ -80,6 +99,29 @@ def results():
     return JSONResponse({"setups": {}})
 
 
+@app.post("/api/upload")
+async def upload(request: Request):
+    """Raw file body; the original file name comes in the X-Filename header."""
+    ip = request.client.host if request.client else "?"
+    window, now = _upload_hits[ip], time.time()
+    while window and now - window[0] > 3600:
+        window.popleft()
+    if len(window) >= UPLOAD_LIMIT:
+        raise HTTPException(429, "Too many uploads this hour — try again later.")
+    window.append(now)
+    from urllib.parse import unquote
+    filename = unquote(request.headers.get("x-filename", "upload.csv"))
+    data = await request.body()
+    try:
+        info = build_database(data, filename)
+    except UploadError as err:
+        raise HTTPException(400, str(err))
+    return {"db_id": info["db_id"], "file": info["file"], "truncated": info["truncated"],
+            "tables": [{"name": t["name"], "columns": t["columns"], "rows": t["rows"]}
+                       for t in info["tables"]],
+            "examples": suggest_questions(info["tables"])}
+
+
 @app.post("/api/ask")
 def ask(body: Ask, request: Request):
     question = body.question.strip()[:500]
@@ -88,11 +130,12 @@ def ask(body: Ask, request: Request):
     if not _allowed(request.client.host if request.client else "?"):
         raise HTTPException(429, "Too many questions this hour — try again later.")
 
+    target = _db_for(body.db_id)
     events: queue.Queue = queue.Queue()
 
     def work():
         try:
-            agent = Agent(llm, db, routed=True, emit=events.put)
+            agent = Agent(llm, target, routed=True, emit=events.put)
             out = agent.run(question)
             answer = ""
             if out.get("rows") and MODE == "live":

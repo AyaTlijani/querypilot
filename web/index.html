@@ -65,6 +65,14 @@ form.ask input:focus{background:#fff;box-shadow:inset 0 0 0 2px var(--purple)}
   font:11px var(--mono);cursor:pointer;transition:.12s;white-space:nowrap}
 .btn:hover{transform:translate(3px,3px);box-shadow:1px 1px var(--ink)}
 .btn:disabled{opacity:.6;cursor:wait;transform:none;box-shadow:4px 4px var(--ink)}
+.dataset{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:14px;padding-top:14px;
+  border-top:1px dashed rgba(23,21,42,.25);font:11px var(--mono)}
+.dataset .name{padding:4px 8px;border:1.5px solid var(--ink);background:var(--sky);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn.ghost{background:#fff;color:var(--ink);padding:7px 12px;font-size:10px;box-shadow:3px 3px var(--ink)}
+.btn.ghost:hover{box-shadow:1px 1px var(--ink)}
+.linkbtn{border:0;background:none;padding:0;font:11px var(--mono);text-decoration:underline;cursor:pointer;color:#6956b4}
+.drop{outline:3px dashed var(--purple-d);outline-offset:-8px;background:#f6f3ff}
+.uperr{color:var(--red);font:11px var(--mono);width:100%}
 .chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:14px}
 .chip{border:1px solid var(--ink);background:#fff;padding:5px 9px;font:10px var(--mono);cursor:pointer;text-align:left}
 .chip:hover{background:var(--sky)}
@@ -153,13 +161,21 @@ footer{text-align:center;font:10px var(--mono);color:var(--muted);padding:20px}
   <div class="grid">
     <div class="stack">
       <div class="win">
-        <div class="wh"><span class="dots"><b></b><b></b><b></b></span>ask.exe<span class="right">demo db: european online shop</span></div>
-        <div class="wb">
+        <div class="wh"><span class="dots"><b></b><b></b><b></b></span>ask.exe<span class="right" id="dbtitle">demo db: european online shop</span></div>
+        <div class="wb" id="askbody">
           <form class="ask" id="askform">
             <input id="q" autocomplete="off" placeholder="e.g. Which carriers deliver late most often?" maxlength="500">
             <button class="btn" id="go">run agent ↗</button>
           </form>
           <div class="chips" id="examples"></div>
+          <div class="dataset">
+            <span>data:</span><span class="name" id="dsname">demo shop (6 tables)</span>
+            <label class="btn ghost" for="file">↑ use your own CSV / Excel</label>
+            <input type="file" id="file" accept=".csv,.tsv,.txt,.xlsx" hidden>
+            <button type="button" class="linkbtn" id="backdemo" hidden>back to demo</button>
+            <span id="uphint" style="color:var(--muted)">or drop a file here</span>
+            <span class="uperr" id="uperr" hidden></span>
+          </div>
         </div>
       </div>
 
@@ -242,15 +258,57 @@ document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
   if (t.dataset.tab === "bench") loadResults();
 });
 
+/* dataset state */
+let currentDb = null, demoInfo = null;
+function showSchema(tables) {
+  $("#schema").innerHTML = tables.map(t =>
+    `<div class="tbl"><h4>${esc(t.name)}${t.rows != null ? ` <span style="opacity:.6">· ${t.rows.toLocaleString()} rows</span>` : ""}</h4><p>${t.columns.map(esc).join("<br>")}</p></div>`).join("");
+}
+function showExamples(list) {
+  $("#examples").innerHTML = list.map(e => `<button class="chip">${esc(e)}</button>`).join("");
+  $("#examples").querySelectorAll(".chip").forEach(c => c.onclick = () => { $("#q").value = c.textContent; run(); });
+}
+function useDemo() {
+  currentDb = null;
+  $("#dsname").textContent = `demo shop (${demoInfo.tables.length} tables)`;
+  $("#dbtitle").textContent = "demo db: european online shop";
+  $("#backdemo").hidden = true; $("#uperr").hidden = true;
+  showSchema(demoInfo.tables); showExamples(demoInfo.examples);
+}
+async function uploadFile(file) {
+  if (!file) return;
+  $("#uperr").hidden = true;
+  $("#uphint").textContent = "converting…";
+  try {
+    const res = await fetch("/api/upload", {method: "POST",
+      headers: {"X-Filename": encodeURIComponent(file.name)}, body: file});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    currentDb = data.db_id;
+    const rows = data.tables.reduce((n, t) => n + t.rows, 0);
+    $("#dsname").textContent = `${data.file} (${data.tables.length} table${data.tables.length > 1 ? "s" : ""}, ${rows.toLocaleString()} rows)`;
+    $("#dbtitle").textContent = `your data: ${data.file}`;
+    $("#backdemo").hidden = false;
+    showSchema(data.tables); showExamples(data.examples);
+    if (data.truncated) { $("#uperr").textContent = "Large file: only the first 200,000 rows per sheet were loaded."; $("#uperr").hidden = false; }
+  } catch (err) {
+    $("#uperr").textContent = err.message; $("#uperr").hidden = false;
+  } finally { $("#uphint").textContent = "or drop a file here"; $("#file").value = ""; }
+}
+$("#file").onchange = e => uploadFile(e.target.files[0]);
+$("#backdemo").onclick = useDemo;
+const dropZone = $("#askbody");
+dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("drop"); });
+dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drop"));
+dropZone.addEventListener("drop", e => { e.preventDefault(); dropZone.classList.remove("drop"); uploadFile(e.dataTransfer.files[0]); });
+
 /* info */
 fetch("/api/info").then(r => r.json()).then(info => {
+  demoInfo = info;
   const m = $("#mode");
   m.textContent = info.mode === "live" ? `● live · ${info.provider === "ollama" ? "local " + info.models[1] : info.models[1]}` : "● offline demo";
   m.classList.toggle("off", info.mode !== "live");
-  $("#examples").innerHTML = info.examples.map(e => `<button class="chip">${esc(e)}</button>`).join("");
-  $("#examples").querySelectorAll(".chip").forEach(c => c.onclick = () => { $("#q").value = c.textContent; run(); });
-  $("#schema").innerHTML = info.tables.map(t =>
-    `<div class="tbl"><h4>${esc(t.name)}</h4><p>${t.columns.map(esc).join("<br>")}</p></div>`).join("");
+  useDemo();
 });
 
 /* trace rendering */
@@ -322,7 +380,7 @@ async function run() {
   $("#answerwin").hidden = true;
   $("#tracestate").innerHTML = `<span class="pulse"></span>running`;
   try {
-    const res = await fetch("/api/ask", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({question: q})});
+    const res = await fetch("/api/ask", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({question: q, db_id: currentDb})});
     if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || res.statusText); }
     const reader = res.body.getReader(), dec = new TextDecoder();
     let buf = "";

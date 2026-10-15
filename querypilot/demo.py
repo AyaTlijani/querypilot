@@ -126,14 +126,17 @@ def offline_llm() -> FakeLLM:
         if n_tool_msgs == 0:
             return LLMReply(content="Let me see which tables exist.",
                             tool_calls=[{"id": "c1", "name": "list_tables", "arguments": {}}])
+        listed = [m for m in messages if m["role"] == "tool"][0]["content"]
+        tables = [t.strip() for t in listed.split(",") if t.strip()]
+        table = "orders" if "orders" in tables else tables[0]
         if n_tool_msgs == 1:
             return LLMReply(content="Checking a few real rows first.",
                             tool_calls=[{"id": "c2", "name": "sample_rows",
-                                         "arguments": {"table": "orders", "n": 3}}])
+                                         "arguments": {"table": table, "n": 3}}])
+        sql = ("SELECT status, COUNT(*) AS orders FROM orders GROUP BY status" if table == "orders"
+               else f'SELECT COUNT(*) AS row_count FROM "{table}"')
         return LLMReply(content="Offline mode: submitting a placeholder query.",
-                        tool_calls=[{"id": "c3", "name": "submit_sql",
-                                     "arguments": {"sql": "SELECT status, COUNT(*) AS orders "
-                                                          "FROM orders GROUP BY status"}}])
+                        tool_calls=[{"id": "c3", "name": "submit_sql", "arguments": {"sql": sql}}])
 
     return FakeLLM(responder=responder)
 
