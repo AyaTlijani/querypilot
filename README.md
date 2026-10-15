@@ -24,6 +24,13 @@ question ─▶ think ─▶ use tools ─▶ think ─▶ submit SQL ─▶ ver
 - **Read-only by construction** (see [Safety](#safety)).
 - **Speaks MCP.** The same tools are exposed as a Model Context Protocol server, so Claude Desktop, IDEs or other agents can use the sandbox directly.
 
+- **Works on your own data.** Upload a CSV or Excel file and it becomes a read-only SQLite database:
+  - Each Excel sheet becomes a table.
+  - Delimiters, encodings and French decimal commas are detected.
+  - Column names are cleaned into safe SQL identifiers.
+  - Starter questions are suggested from your columns.
+  - Uploads are deleted after 24 hours.
+
 The web app shows the agent's trace live: every tool call, failed query, repair and model escalation, then the answer with a table, a chart and the final SQL.
 
 ## Evaluation
@@ -139,6 +146,7 @@ querypilot/
   server.py      FastAPI app, live agent trace over server-sent events, rate limit
   mcp_server.py  the same tools over the Model Context Protocol
   demo.py        demo shop database generator
+  uploads.py     CSV / Excel -> SQLite conversion (type inference, name cleaning, limits)
 web/index.html   the interface
 tests/           safety, scoring, agent loop and runner tests
 ```
