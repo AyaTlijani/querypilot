@@ -19,3 +19,14 @@ def test_fake_run_writes_logs_summary_and_resumes(shop, tmp_path, capsys):
     # second run: nothing left to do
     evaluate.main(args)
     assert "0 still to run" in capsys.readouterr().out
+
+
+def test_sample_is_fixed_and_spread(tmp_path):
+    import json as _j
+    qs = [{"question_id": i, "db_id": f"db{i % 5}", "question": "q", "SQL": "SELECT 1"} for i in range(100)]
+    f = tmp_path / "q.json"
+    f.write_text(_j.dumps(qs))
+    a = evaluate.load_questions(f, None, 20, 42)
+    b = evaluate.load_questions(f, None, 20, 42)
+    assert [q["question_id"] for q in a] == [q["question_id"] for q in b]
+    assert len(a) == 20 and len({q["db_id"] for q in a}) == 5

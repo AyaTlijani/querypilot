@@ -26,11 +26,18 @@ from .scoring import score
 SETUPS = ("one_shot", "agent", "routed")
 
 
-def load_questions(path: Path, limit: int | None) -> list[dict]:
+def load_questions(path: Path, limit: int | None, sample: int | None = None,
+                   seed: int = 42) -> list[dict]:
     items = json.loads(path.read_text(encoding="utf-8"))
     for i, q in enumerate(items):
         q.setdefault("question_id", i)
         q.setdefault("difficulty", "unknown")
+    if sample and sample < len(items):
+        # Fixed random subset (same seed -> same questions every run), spread
+        # over all databases and difficulties instead of the first N in file order.
+        import random
+        picked = random.Random(seed).sample(items, sample)
+        items = sorted(picked, key=lambda q: q["question_id"])
     return items[:limit] if limit else items
 
 
@@ -118,7 +125,7 @@ def to_markdown(summary: dict) -> str:
     m = summary["meta"]
     lines = [f"# QueryPilot — BIRD Mini-Dev results",
              "",
-             f"Run: {m.get('date', '?')} · evidence hints: {m.get('evidence', '?')} · "
+             f"Run: {m.get('date', '?')} · questions: {m.get('sample', 'all')} · evidence hints: {m.get('evidence', '?')} · "
              f"temperature 0 · timeout 30 s · scoring: official BIRD EX (set equality)",
              "",
              f"Models: {m.get('models', '?')} · provider: {m.get('provider', '?')}",
@@ -151,6 +158,9 @@ def main(argv=None):
     ap.add_argument("--db-root", type=Path, default=Path("data/minidev/MINIDEV/dev_databases"))
     ap.add_argument("--setups", default=",".join(SETUPS))
     ap.add_argument("--limit", type=int, default=None, help="only the first N questions")
+    ap.add_argument("--sample", type=int, default=None,
+                    help="a fixed random subset of N questions (same for every setup and every run)")
+    ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--no-evidence", action="store_true", help="hide BIRD's evidence hints from all setups")
     ap.add_argument("--out", type=Path, default=Path("results"))
     ap.add_argument("--yes", action="store_true", help="don't ask before continuing past the cost check")
@@ -160,7 +170,8 @@ def main(argv=None):
 
     args.out.mkdir(parents=True, exist_ok=True)
     meta = {"date": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-            "evidence": not args.no_evidence, "data": str(args.data)}
+            "evidence": not args.no_evidence, "data": str(args.data),
+            "sample": f"{args.sample} questions, seed {args.seed}" if args.sample else "all"}
     if args.summary_only:
         print(to_markdown(summarize(args.out, meta)))
         return
@@ -175,7 +186,7 @@ def main(argv=None):
     meta.update(provider="fake" if args.fake else PROVIDER, models=f"small={SMALL}, large={LARGE}")
 
     setups = [s.strip() for s in args.setups.split(",") if s.strip() in SETUPS]
-    questions = load_questions(args.data, args.limit)
+    questions = load_questions(args.data, args.limit, args.sample, args.seed)
     finished = {s: done_ids(args.out / f"{s}.jsonl") for s in setups}
     todo = [q for q in questions if any(q["question_id"] not in finished[s] for s in setups)]
     print(f"{len(questions)} questions · {len(todo)} still to run · setups: {', '.join(setups)}")
