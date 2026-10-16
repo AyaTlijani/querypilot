@@ -91,3 +91,10 @@ def test_extract_sql_handles_fence_labels():
     assert extract_sql("```SELECT a FROM t```") == "SELECT a FROM t"
     assert extract_sql("Here you go:\nSELECT a FROM t;") == "SELECT a FROM t"
     assert extract_sql("```sql\nWITH x AS (SELECT 1) SELECT * FROM x\n```").startswith("WITH")
+
+
+def test_extract_sql_drops_label_lines_inside_block():
+    from querypilot.agent import extract_sql
+    assert extract_sql("```\nsql\nSELECT 1\n```") == "SELECT 1"
+    assert extract_sql("```sql\nsql\nSELECT 1\n```") == "SELECT 1"
+    assert extract_sql("```\r\nSQLite\r\nSELECT 1\r\n```") == "SELECT 1"

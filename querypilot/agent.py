@@ -79,7 +79,12 @@ def extract_sql(text: str) -> str:
     else:
         start = _SQL_START.search(text)
         body = text[start.start():] if start else text
-    return body.strip().rstrip(";").strip()
+    # Some models repeat the language label on its own line inside the block
+    # ("```\nsql\nSELECT ..."); drop any such label lines before the query.
+    lines = body.strip().splitlines()
+    while lines and lines[0].strip().lower() in _LANG_TAGS - {""}:
+        lines.pop(0)
+    return "\n".join(lines).strip().rstrip(";").strip()
 
 
 def _table(res, limit=PREVIEW_ROWS) -> str:
