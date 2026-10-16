@@ -89,6 +89,19 @@ form.ask input::placeholder{color:var(--dim)}
 .drop{outline:1px dashed var(--neon);outline-offset:-6px;background:rgba(61,255,168,.04)}
 .uperr{color:var(--red);width:100%}
 
+/* upload page */
+.dropzone{display:grid;place-items:center;text-align:center;gap:14px;padding:56px 24px;border:1px dashed var(--line2);border-radius:12px;
+  background:radial-gradient(500px 220px at 50% 0%,rgba(56,214,255,.07),transparent 70%),#0a0d12;transition:.15s;cursor:pointer}
+.dropzone:hover,.dropzone.drop{border-color:var(--cyan);box-shadow:0 0 0 1px rgba(56,214,255,.35),0 0 30px rgba(56,214,255,.12);outline:0}
+.dropzone .big{width:54px;height:54px;border-radius:14px;display:grid;place-items:center;font:600 22px var(--mono);color:var(--cyan);
+  border:1px solid rgba(56,214,255,.45);background:rgba(56,214,255,.08);box-shadow:0 0 22px rgba(56,214,255,.25)}
+.dropzone h3{font-size:18px}
+.dropzone p{margin:0;color:var(--muted);font:12px var(--mono)}
+.facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:16px}
+.fact{border:1px solid var(--line);border-radius:10px;padding:14px;background:#0a0d12;font-size:13px;color:var(--muted)}
+.fact b{display:block;color:var(--text);font:600 12px var(--mono);margin-bottom:6px}
+@media(max-width:900px){.facts{grid-template-columns:1fr}}
+
 /* schema */
 .schema{display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:10px}
 .tbl{border:1px solid var(--line);border-radius:8px;background:#0a0d12;overflow:hidden}
@@ -165,7 +178,8 @@ footer{text-align:center;font:11px var(--mono);color:var(--dim);padding:22px}
 <header class="bar"><div class="bar-in">
   <div class="logo"><i>⌘</i>querypilot<b>/sql-agent</b></div>
   <nav class="tabs">
-    <button class="tab on" data-tab="ask">ask</button>
+    <button class="tab on" data-tab="demo">demo</button>
+    <button class="tab" data-tab="data">your data</button>
     <button class="tab" data-tab="bench">benchmark</button>
   </nav>
   <span id="mode" class="badge">…</span>
@@ -178,9 +192,9 @@ footer{text-align:center;font:11px var(--mono);color:var(--dim);padding:22px}
 <section id="ask">
   <div class="hero">
     <div>
-      <p class="eyebrow">Autonomous data analyst agent</p>
-      <h1>Ask your data.<br><span>Watch it think.</span></h1>
-      <p>QueryPilot explores the database, writes SQL, checks its own results and repairs its mistakes — every step visible, every query read-only.</p>
+      <p class="eyebrow" id="askeyebrow">Demo · European online shop</p>
+      <h1 id="asktitle">Ask your data.<br><span>Watch it think.</span></h1>
+      <p id="asklead">QueryPilot explores the database, writes SQL, checks its own results and repairs its mistakes — every step visible, every query read-only.</p>
     </div>
   </div>
 
@@ -196,11 +210,8 @@ footer{text-align:center;font:11px var(--mono);color:var(--dim);padding:22px}
           <div class="chips" id="examples"></div>
           <div class="dataset">
             <span>data:</span><span class="name" id="dsname">demo shop (6 tables)</span>
-            <label class="btn ghost" for="file">↑ Upload CSV / Excel</label>
-            <input type="file" id="file" accept=".csv,.tsv,.txt,.xlsx" hidden>
-            <button type="button" class="linkbtn" id="backdemo" hidden>back to demo</button>
-            <span id="uphint">or drop a file here</span>
-            <span class="uperr" id="uperr" hidden></span>
+            <button type="button" class="btn ghost" id="replace" hidden>↻ use another file</button>
+            <span class="uperr" id="truncnote" hidden></span>
           </div>
         </div>
       </div>
@@ -226,6 +237,32 @@ footer{text-align:center;font:11px var(--mono);color:var(--dim);padding:22px}
       <div class="wh blue"><span class="dots"><b></b><b></b><b></b></span>agent trace<span class="right" id="tracestate">idle</span></div>
       <div class="wb">
         <ul class="trace" id="trace"><li class="empty" style="display:block">Waiting for a question…<br><br>Each step appears here as it happens: exploration, SQL attempts, verification, repairs.</li></ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ YOUR DATA ============ -->
+<section id="upload" hidden>
+  <div class="hero">
+    <p class="eyebrow">Your data</p>
+    <h1>Bring a spreadsheet.<br><span>Ask it anything.</span></h1>
+    <p>Upload a CSV or Excel file. QueryPilot turns it into a read-only database and the agent answers questions about it, showing every query it runs.</p>
+  </div>
+  <div class="win">
+    <div class="wh blue">upload<span class="right">.csv · .xlsx · up to 20 MB</span></div>
+    <div class="wb">
+      <label class="dropzone" id="dropzone" for="file">
+        <span class="big">↑</span>
+        <h3 id="uptitle">Drop a file here, or click to choose</h3>
+        <p id="uphint">Each Excel sheet becomes a table · column names and types are detected</p>
+      </label>
+      <input type="file" id="file" accept=".csv,.tsv,.txt,.xlsx" hidden>
+      <p class="uperr" id="uperr" hidden style="margin:12px 0 0;font:12px var(--mono)"></p>
+      <div class="facts">
+        <div class="fact"><b>Read-only</b>Your file becomes a database the agent can only read, never modify.</div>
+        <div class="fact"><b>Messy files welcome</b>Semicolons, accents, decimal commas and odd column names are handled.</div>
+        <div class="fact"><b>Temporary</b>Uploaded data is deleted automatically after 24 hours.</div>
       </div>
     </div>
   </div>
@@ -277,12 +314,24 @@ if (typeof Chart !== "undefined") {
 }
 
 /* tabs */
-document.querySelectorAll(".tab").forEach(t => t.onclick = () => {
-  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === t));
-  $("#ask").hidden = t.dataset.tab !== "ask";
-  $("#bench").hidden = t.dataset.tab !== "bench";
-  if (t.dataset.tab === "bench") loadResults();
-});
+let mode = "demo", uploaded = null;
+function showPage(page) {
+  $("#ask").hidden = page !== "ask"; $("#upload").hidden = page !== "upload"; $("#bench").hidden = page !== "bench";
+}
+function clearRun() {
+  $("#trace").innerHTML = `<li class="empty" style="display:block">Waiting for a question…</li>`;
+  $("#answerwin").hidden = true; $("#tracestate").textContent = "idle"; $("#q").value = "";
+}
+function switchTab(tab) {
+  document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x.dataset.tab === tab));
+  if (tab === "bench") { showPage("bench"); loadResults(); return; }
+  if (tab !== mode) clearRun();
+  mode = tab;
+  if (tab === "demo") { useDemo(); showPage("ask"); }
+  else if (uploaded) { useUploaded(); showPage("ask"); }
+  else showPage("upload");
+}
+document.querySelectorAll(".tab").forEach(t => t.onclick = () => switchTab(t.dataset.tab));
 
 /* dataset state */
 let currentDb = null, demoInfo = null;
@@ -296,34 +345,46 @@ function showExamples(list) {
 }
 function useDemo() {
   currentDb = null;
+  $("#askeyebrow").textContent = "Demo · European online shop";
+  $("#asktitle").innerHTML = "Ask your data.<br><span>Watch it think.</span>";
+  $("#asklead").textContent = "QueryPilot explores the database, writes SQL, checks its own results and repairs its mistakes — every step visible, every query read-only.";
   $("#dsname").textContent = `demo shop (${demoInfo.tables.length} tables)`;
   $("#dbtitle").textContent = "demo db: european online shop";
-  $("#backdemo").hidden = true; $("#uperr").hidden = true;
+  $("#replace").hidden = true; $("#truncnote").hidden = true;
   showSchema(demoInfo.tables); showExamples(demoInfo.examples);
+}
+function useUploaded() {
+  const d = uploaded;
+  currentDb = d.db_id;
+  const rows = d.tables.reduce((n, t) => n + t.rows, 0);
+  $("#askeyebrow").textContent = `Your data · ${d.file}`;
+  $("#asktitle").innerHTML = `${esc(d.file)}<br><span>Ask it anything.</span>`;
+  $("#asklead").textContent = "The agent only sees this file, converted into a read-only database.";
+  $("#dsname").textContent = `${d.file} (${d.tables.length} table${d.tables.length > 1 ? "s" : ""}, ${rows.toLocaleString()} rows)`;
+  $("#dbtitle").textContent = `your data: ${d.file}`;
+  $("#replace").hidden = false;
+  $("#truncnote").textContent = "Large file: only the first 200,000 rows per sheet were loaded.";
+  $("#truncnote").hidden = !d.truncated;
+  showSchema(d.tables); showExamples(d.examples);
 }
 async function uploadFile(file) {
   if (!file) return;
   $("#uperr").hidden = true;
-  $("#uphint").textContent = "converting…";
+  $("#uptitle").textContent = `Converting ${file.name}…`;
   try {
     const res = await fetch("/api/upload", {method: "POST",
       headers: {"X-Filename": encodeURIComponent(file.name)}, body: file});
     const data = await res.json();
     if (!res.ok) throw new Error(data.detail || res.statusText);
-    currentDb = data.db_id;
-    const rows = data.tables.reduce((n, t) => n + t.rows, 0);
-    $("#dsname").textContent = `${data.file} (${data.tables.length} table${data.tables.length > 1 ? "s" : ""}, ${rows.toLocaleString()} rows)`;
-    $("#dbtitle").textContent = `your data: ${data.file}`;
-    $("#backdemo").hidden = false;
-    showSchema(data.tables); showExamples(data.examples);
-    if (data.truncated) { $("#uperr").textContent = "Large file: only the first 200,000 rows per sheet were loaded."; $("#uperr").hidden = false; }
+    uploaded = data;
+    clearRun(); useUploaded(); showPage("ask");
   } catch (err) {
     $("#uperr").textContent = err.message; $("#uperr").hidden = false;
-  } finally { $("#uphint").textContent = "or drop a file here"; $("#file").value = ""; }
+  } finally { $("#uptitle").textContent = "Drop a file here, or click to choose"; $("#file").value = ""; }
 }
 $("#file").onchange = e => uploadFile(e.target.files[0]);
-$("#backdemo").onclick = useDemo;
-const dropZone = $("#askbody");
+$("#replace").onclick = () => { clearRun(); showPage("upload"); };
+const dropZone = $("#dropzone");
 dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classList.add("drop"); });
 dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drop"));
 dropZone.addEventListener("drop", e => { e.preventDefault(); dropZone.classList.remove("drop"); uploadFile(e.dataTransfer.files[0]); });
