@@ -1,16 +1,4 @@
-"""Scoring, identical in rule to BIRD's official `evaluation_ex.py`.
-
-Execution accuracy (EX): a prediction is correct when running it returns the
-same SET of rows as the reference query: `set(pred_rows) == set(gold_rows)`.
-Row order and duplicate rows are ignored, exactly as in the official script.
-A prediction that errors, is blocked, or runs past 30 s counts as wrong.
-
-Two diagnostics are recorded but NEVER counted as correct, so the headline
-number stays strict:
-  * near_miss  : same rows except for extra columns or float rounding
-  * gold_empty : the reference answer is empty (an empty prediction "matches"
-                 trivially), reported separately for transparency
-"""
+"""Scores predicted SQL against BIRD's reference SQL, using BIRD's official rule."""
 
 from __future__ import annotations
 
@@ -26,7 +14,7 @@ MAX_ROWS = 100_000
 
 
 def execute(db: SafeDB, sql: str, trusted: bool = False):
-    """Return (rows, error_kind, error_message)."""
+    """Run a query and return its rows, or the kind of error it hit."""
     if not sql:
         return None, "no_sql", "No SQL produced."
     try:
@@ -36,21 +24,23 @@ def execute(db: SafeDB, sql: str, trusted: bool = False):
         return None, "timeout", str(err)
     except UnsafeQueryError as err:
         return None, "blocked", str(err)
-    except Exception as err:  # sqlite errors: no such column, syntax, ...
+    except Exception as err:
         return None, "sql_error", str(err)
 
 
 def _round(row):
+    """Round floats in a row so tiny rounding differences can be detected."""
     return tuple(round(v, 2) if isinstance(v, float) else v for v in row)
 
 
 def near_miss(pred: list[tuple], gold: list[tuple]) -> bool:
+    """Check if a wrong answer is only off by rounding or extra columns (reported, never counted correct)."""
     if not pred or not gold:
         return False
     if set(map(_round, pred)) == set(map(_round, gold)):
-        return True  # only rounding differs
+        return True
     width = len(gold[0])
-    if len(pred[0]) > width:  # extra columns: does some column subset match?
+    if width < len(pred[0]) <= 12:
         gold_set = set(gold)
         cols = range(len(pred[0]))
         for combo in itertools.combinations(cols, width):
@@ -60,6 +50,7 @@ def near_miss(pred: list[tuple], gold: list[tuple]) -> bool:
 
 
 def tables_in(sql: str) -> set[str]:
+    """List the tables a query uses."""
     try:
         tree = sqlglot.parse_one(sql, read="sqlite")
         return {t.name.lower() for t in tree.find_all(exp.Table)}
@@ -68,12 +59,13 @@ def tables_in(sql: str) -> set[str]:
 
 
 def score(db: SafeDB, pred_sql: str, gold_sql: str) -> dict:
+    """Compare a predicted query with the reference: correct or not, and why."""
     gold, g_kind, g_msg = execute(db, gold_sql, trusted=True)
     pred, p_kind, p_msg = execute(db, pred_sql)
     out = {"correct": False, "gold_empty": gold == [], "near_miss": False,
            "category": "", "error": p_msg}
     if gold is None:
-        out["category"] = "gold_failed"   # reported, excluded from nothing: counts as wrong
+        out["category"] = "gold_failed"
         out["error"] = f"reference query failed: {g_msg}"
         return out
     if pred is None:
@@ -91,5 +83,5 @@ def score(db: SafeDB, pred_sql: str, gold_sql: str) -> dict:
     elif gold and len(pred[0]) != len(gold[0]):
         out["category"] = "wrong_columns"
     else:
-        out["category"] = "wrong_logic"   # right tables, wrong filter/join/aggregation
+        out["category"] = "wrong_logic"
     return out

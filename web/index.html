@@ -29,7 +29,6 @@ h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.02em}
 ::selection{background:rgba(61,255,168,.3)}
 ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:var(--line2);border-radius:8px}
 
-/* top bar */
 .bar{position:sticky;top:0;z-index:10;height:56px;border-bottom:1px solid var(--line);background:rgba(7,9,12,.8);backdrop-filter:blur(12px)}
 .bar-in{max-width:1280px;margin:auto;height:100%;padding:0 22px;display:flex;align-items:center;gap:18px}
 .logo{display:flex;align-items:center;gap:9px;font:600 14px var(--mono);letter-spacing:-.01em}
@@ -53,7 +52,6 @@ main{max-width:1280px;margin:auto;padding:30px 22px 60px}
 .hero h1 span{background:linear-gradient(90deg,var(--neon),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
 .hero p{max-width:62ch;color:var(--muted);margin:12px 0 0}
 
-/* panels */
 .win{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:12px;min-width:0;overflow:hidden;
   box-shadow:0 1px 0 rgba(255,255,255,.03) inset,0 20px 40px -24px rgba(0,0,0,.8)}
 .wh{height:40px;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--line);
@@ -68,7 +66,6 @@ main{max-width:1280px;margin:auto;padding:30px 22px 60px}
 .grid{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:18px;align-items:start}
 .stack{display:grid;gap:18px}
 
-/* composer */
 form.ask{display:flex;gap:10px;align-items:stretch;padding:4px;border:1px solid var(--line2);border-radius:10px;background:#0a0d12;transition:.15s}
 form.ask:focus-within{border-color:rgba(61,255,168,.6);box-shadow:var(--glow)}
 form.ask::before{content:"›";display:grid;place-items:center;padding-left:10px;color:var(--neon);font:600 18px var(--mono)}
@@ -89,7 +86,6 @@ form.ask input::placeholder{color:var(--dim)}
 .drop{outline:1px dashed var(--neon);outline-offset:-6px;background:rgba(61,255,168,.04)}
 .uperr{color:var(--red);width:100%}
 
-/* upload page */
 .dropzone{display:grid;place-items:center;text-align:center;gap:14px;padding:56px 24px;border:1px dashed var(--line2);border-radius:12px;
   background:radial-gradient(500px 220px at 50% 0%,rgba(56,214,255,.07),transparent 70%),#0a0d12;transition:.15s;cursor:pointer}
 .dropzone:hover,.dropzone.drop{border-color:var(--cyan);box-shadow:0 0 0 1px rgba(56,214,255,.35),0 0 30px rgba(56,214,255,.12);outline:0}
@@ -102,14 +98,12 @@ form.ask input::placeholder{color:var(--dim)}
 .fact b{display:block;color:var(--text);font:600 12px var(--mono);margin-bottom:6px}
 @media(max-width:900px){.facts{grid-template-columns:1fr}}
 
-/* schema */
 .schema{display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:10px}
 .tbl{border:1px solid var(--line);border-radius:8px;background:#0a0d12;overflow:hidden}
 .tbl h4{margin:0;padding:7px 10px;font:600 11px var(--mono);color:var(--amber);border-bottom:1px solid var(--line);background:rgba(255,181,71,.05)}
 .tbl h4 span{color:var(--dim);font-weight:400}
 .tbl p{margin:0;padding:7px 10px;font:11px/1.75 var(--mono);color:var(--muted)}
 
-/* trace */
 .trace{list-style:none;margin:0;padding:0;font:12px/1.6 var(--mono);max-height:640px;overflow:auto;position:relative}
 .trace li{display:grid;grid-template-columns:22px 1fr;gap:10px;padding:8px 0;animation:in .25s ease;position:relative}
 .trace li:not(.empty)::after{content:"";position:absolute;left:10px;top:30px;bottom:-8px;width:1px;background:var(--line)}
@@ -128,7 +122,6 @@ form.ask input::placeholder{color:var(--dim)}
 .pulse{display:inline-block;width:7px;height:7px;background:var(--neon);border-radius:50%;margin-right:7px;box-shadow:0 0 10px var(--neon);animation:p 1s infinite}
 @keyframes p{50%{opacity:.25}}
 
-/* result */
 .answer{font-size:16px;font-weight:500;margin:0 0 12px;line-height:1.5}
 .stats{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px}
 .stat{font:11px var(--mono);padding:3px 9px;border-radius:999px;border:1px solid var(--line2);color:var(--muted)}
@@ -147,7 +140,6 @@ tr:hover td{background:rgba(255,255,255,.02)}
 .copy{position:absolute;top:8px;right:8px;font:11px var(--mono);background:var(--panel2);color:var(--muted);border:1px solid var(--line2);border-radius:6px;padding:3px 8px;cursor:pointer}
 .copy:hover{color:var(--neon);border-color:var(--neon)}
 
-/* benchmark */
 .cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;margin-bottom:18px}
 .card{padding:18px;border:1px solid var(--line);border-radius:12px;background:linear-gradient(180deg,var(--panel2),var(--panel));position:relative;overflow:hidden}
 .card::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:var(--violet)}
@@ -188,7 +180,6 @@ footer{text-align:center;font:11px var(--mono);color:var(--dim);padding:22px}
 
 <main>
 
-<!-- ============ ASK ============ -->
 <section id="ask">
   <div class="hero">
     <div>
@@ -242,7 +233,6 @@ footer{text-align:center;font:11px var(--mono);color:var(--dim);padding:22px}
   </div>
 </section>
 
-<!-- ============ YOUR DATA ============ -->
 <section id="upload" hidden>
   <div class="hero">
     <p class="eyebrow">Your data</p>
@@ -268,7 +258,6 @@ footer{text-align:center;font:11px var(--mono);color:var(--dim);padding:22px}
   </div>
 </section>
 
-<!-- ============ BENCHMARK ============ -->
 <section id="bench" hidden>
   <div class="hero">
     <div>
@@ -313,7 +302,6 @@ if (typeof Chart !== "undefined") {
   Chart.defaults.color = "#7d8896"; Chart.defaults.borderColor = "#1d2530"; Chart.defaults.maintainAspectRatio = false; Chart.defaults.animation = false;
 }
 
-/* tabs */
 let mode = "demo", uploaded = null;
 function showPage(page) {
   $("#ask").hidden = page !== "ask"; $("#upload").hidden = page !== "upload"; $("#bench").hidden = page !== "bench";
@@ -333,7 +321,6 @@ function switchTab(tab) {
 }
 document.querySelectorAll(".tab").forEach(t => t.onclick = () => switchTab(t.dataset.tab));
 
-/* dataset state */
 let currentDb = null, demoInfo = null;
 function showSchema(tables) {
   $("#schema").innerHTML = tables.map(t =>
@@ -389,7 +376,6 @@ dropZone.addEventListener("dragover", e => { e.preventDefault(); dropZone.classL
 dropZone.addEventListener("dragleave", () => dropZone.classList.remove("drop"));
 dropZone.addEventListener("drop", e => { e.preventDefault(); dropZone.classList.remove("drop"); uploadFile(e.dataTransfer.files[0]); });
 
-/* info */
 fetch("/api/info").then(r => r.json()).then(info => {
   demoInfo = info;
   const m = $("#mode");
@@ -398,7 +384,6 @@ fetch("/api/info").then(r => r.json()).then(info => {
   useDemo();
 });
 
-/* trace rendering */
 const ICON = {start:["▶",""], thought:["…",""], tool:["⚙","tool"], submit:["⇢","sub"],
               verify:["✓","ok"], repair:["↺","bad"], escalate:["⇧","up"], done:["■","ok"]};
 function addStep(e) {
@@ -428,7 +413,6 @@ function addStep(e) {
   $("#trace").scrollTop = $("#trace").scrollHeight;
 }
 
-/* answer rendering */
 function showAnswer(a) {
   $("#answerwin").hidden = false;
   $("#answer").textContent = a.text || (a.status === "ok" ? "Here is what the data says:" : "The agent could not produce a valid answer.");
@@ -459,7 +443,6 @@ function drawChart(a) {
   });
 }
 
-/* run */
 async function run() {
   const q = $("#q").value.trim();
   if (!q) return;
@@ -494,7 +477,6 @@ async function run() {
 $("#askform").onsubmit = e => { e.preventDefault(); run(); };
 $("#copy").onclick = () => { navigator.clipboard?.writeText($("#sql").textContent); $("#copy").textContent = "copied"; setTimeout(() => $("#copy").textContent = "copy", 1200); };
 
-/* benchmark */
 const NAMES = {one_shot: "One-shot LLM", agent: "Agent (large model)", routed: "Agent + routing"};
 const CAT_COLORS = {correct: "#3dffa8", wrong_logic: "#a78bfa", wrong_tables: "#38d6ff", wrong_columns: "#5b7cfa",
   empty_result: "#f472b6", sql_error: "#ff5c7a", timeout: "#ffb547", blocked: "#e6edf3", no_sql: "#4d5765",

@@ -1,10 +1,4 @@
-"""Demo database (a realistic European online shop) and an offline fallback model.
-
-The demo database exists only so people can try QueryPilot on questions they
-understand. It is never used for benchmark numbers (those come from BIRD).
-
-    python -m querypilot.demo          # builds data/demo/shop.sqlite
-"""
+"""Builds the demo online-shop database and the offline fake model."""
 
 from __future__ import annotations
 
@@ -42,6 +36,7 @@ CARRIERS = ["DHL", "UPS", "Colissimo", "GLS", "DPD"]
 
 
 def build(path: Path = DEMO_PATH, seed: int = 7) -> Path:
+    """Generate the demo shop database with a fixed random seed."""
     rng = random.Random(seed)
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.exists():
@@ -76,7 +71,6 @@ def build(path: Path = DEMO_PATH, seed: int = 7) -> Path:
                              f"Supplier {rng.choice('ABCDEFG')}"))
             pid += 1
     con.executemany("INSERT INTO products VALUES (?,?,?,?,?)", products)
-    # A few deliberately weak products, so rating questions have real answers.
     weak = set(rng.sample(range(1, pid), 6))
     late_carrier = "GLS"
 
@@ -115,13 +109,12 @@ def build(path: Path = DEMO_PATH, seed: int = 7) -> Path:
 
 
 def offline_llm() -> FakeLLM:
-    """Used only when no API key is set: walks through the agent loop with a
-    generic query so the interface and pipeline can be checked offline.
-    The UI labels this mode clearly; it is not the real agent."""
 
-    def responder(messages, tools, model):
+    """A fake model used when no real model is available, so the app still works."""
+    def responder(messages, model):
+        """Return a scripted reply that walks through a draft, a failure and a repair."""
         system = messages[0]["content"].lower()
-        if "previous query did not work" in system:     # repair: use the diagnostics
+        if "previous query did not work" in system:
             notes = messages[-1]["content"]
             m = re.search(r"\[list_tables \{\}\]\n([^\n]+)", notes)
             tables = [t.strip() for t in (m.group(1) if m else "orders").split(",") if t.strip()]
@@ -129,7 +122,7 @@ def offline_llm() -> FakeLLM:
             sql = ("SELECT status, COUNT(*) AS orders FROM orders GROUP BY status" if table == "orders"
                    else f'SELECT COUNT(*) AS row_count FROM "{table}"')
             return LLMReply(content=f"```sql\n{sql}\n```")
-        if "translate questions into sqlite" in system:  # first draft fails on purpose
+        if "translate questions into sqlite" in system:
             return LLMReply(content="```sql\nSELECT * FROM my_table\n```")
         return LLMReply(content="Offline mode: start Ollama for real answers.")
 

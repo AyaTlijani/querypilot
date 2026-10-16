@@ -1,7 +1,5 @@
-"""Download BIRD Mini-Dev (databases + questions) into data/minidev/.
+"""Downloads the BIRD Mini-Dev benchmark into data/minidev/."""
 
-    python scripts/get_bird.py
-"""
 import shutil
 import sys
 import urllib.request
@@ -13,11 +11,11 @@ DEST = Path("data/minidev")
 
 
 def main():
+    """Download and unzip BIRD Mini-Dev, resuming an interrupted download."""
     DEST.mkdir(parents=True, exist_ok=True)
     archive = DEST / "minidev.zip"
     part = DEST / "minidev.zip.part"
     if not archive.exists():
-        # Resume an interrupted download instead of starting over (saves data).
         done = part.stat().st_size if part.exists() else 0
         req = urllib.request.Request(URL, headers={"Range": f"bytes={done}-"} if done else {})
         print(f"Downloading {URL} (about 1.3 GB)" + (f", resuming at {done >> 20} MB" if done else "") + "...")
