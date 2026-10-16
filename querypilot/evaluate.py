@@ -119,6 +119,10 @@ def summarize(out_dir: Path, meta: dict) -> dict:
             "escalation_rate": round(100 * sum(r["escalated"] for r in rows) / n, 1),
             "models": sorted({m for r in rows for m in r["models"]}),
         }
+    models = sorted({m for st in summary["setups"].values() for m in st["models"]})
+    if models and meta.get("models", "?") in ("?", None, ""):
+        meta["models"] = ", ".join(models)
+        meta["provider"] = "gemini" if any("gemini" in m for m in models) else "ollama (local)"
     (out_dir / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     (out_dir / "summary.md").write_text(to_markdown(summary), encoding="utf-8")
     return summary

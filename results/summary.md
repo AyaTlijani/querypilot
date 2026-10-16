@@ -1,8 +1,8 @@
 # QueryPilot — BIRD Mini-Dev results
 
-Run: 2026-10-16 08:54 UTC · questions: all · evidence hints: True · temperature 0 · timeout 30 s · scoring: official BIRD EX (set equality)
+Run: 2026-10-16 08:58 UTC · questions: 200 questions, seed 42 · evidence hints: True · temperature 0 · timeout 30 s · scoring: official BIRD EX (set equality)
 
-Models: ? · provider: ?
+Models: qwen2.5-coder:1.5b, qwen2.5-coder:7b · provider: ollama (local)
 
 | Setup | Questions | EX | Tokens / question | Cost / question | Median time | LLM calls | Escalated |
 |---|---|---|---|---|---|---|---|

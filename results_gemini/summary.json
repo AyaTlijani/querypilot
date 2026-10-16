@@ -1,9 +1,11 @@
 {
   "meta": {
-    "date": "2026-10-16 08:54 UTC",
+    "date": "2026-10-16 08:58 UTC",
     "evidence": true,
-    "data": "data\\minidev\\MINIDEV\\mini_dev_sqlite.json",
-    "sample": "all"
+    "data": "data/minidev/MINIDEV/mini_dev_sqlite.json",
+    "sample": "200 questions, seed 42",
+    "models": "gemini-3.5-flash-lite",
+    "provider": "gemini"
   },
   "setups": {
     "one_shot": {

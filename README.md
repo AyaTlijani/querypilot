@@ -72,7 +72,35 @@ The final design keeps working answers and runs the diagnostics itself. These ar
 
 **Failure categories:** every wrong answer is tagged `wrong_logic`, `wrong_tables`, `wrong_columns`, `empty_result`, `sql_error`, `timeout`, `blocked`, `no_sql` or `api_error`.
 
-**Results:** see [`results/summary.md`](results/summary.md) and the *Benchmark* tab of the app. Per-question logs for every setup (`results/*.jsonl`) are published too. They include each SQL attempt, error, cost and the agent's trace.
+## Results
+
+200 questions, a fixed random sample of BIRD Mini-Dev (seed 42) covering all 11 databases. Every setup answered the same 200 questions.
+
+**Local: Qwen2.5-Coder 7B on a laptop GPU (RTX 3050, 6 GB), via Ollama**
+
+| Setup | Execution accuracy | SQL errors left | Median time |
+|---|---|---|---|
+| One-shot | 47.0% | 27 | 14 s |
+| **Agent** | **51.0%** (+4.0 pts) | 10 | 13 s |
+| Routed (1.5B drafts, 7B repairs) | 40.0% | 21 | 22 s |
+
+- **The agent fixed 8 questions one-shot got wrong and broke none.** The model is deterministic here: all 200 drafts were identical to the one-shot answers, so the +4.0 points come entirely from the repair loop. 8 fixes against 0 regressions is unlikely to be chance (sign test, p < 0.01).
+- **The repair loop turned 17 of 27 crashing queries into running ones,** and 8 of those into correct answers. 40 questions entered repair.
+- **Routing didn't pay off.** The 1.5B model's drafts often *run* but return the wrong answer, and a running query is never sent to repair. It lost 28 answers the 7B model got right and cost more tokens. "The query executes" is too weak a signal to decide when to escalate. That's a useful negative result, and it's why routing isn't the default in the benchmark setup.
+
+**Cloud: Gemini 3.5 Flash-Lite (free tier)**
+
+| Setup | Execution accuracy | SQL errors left | Median time |
+|---|---|---|---|
+| One-shot | 62.5% | 2 | 4 s |
+| Agent | 64.0% | 0 | 4 s |
+
+- **The stronger model makes far fewer crashing queries,** so there is less for the repair loop to fix: 12 questions entered repair, and 5 were fixed.
+- **Gemini isn't fully deterministic,** even at temperature 0: only 100 of the 200 agent drafts were identical to its one-shot answers. The +1.5 points are within that noise, so the reliable figure for Gemini is the repair success rate (5 of 12).
+
+**Where both still fail:** the remaining errors are mostly *wrong logic* (right tables, wrong filter, join or aggregation) and *wrong tables*. These are queries that run fine, so execution feedback can't catch them. That's the clearest next step (see Limits).
+
+Full tables: [`results/summary.md`](results/summary.md) (local) and [`results_gemini/summary.md`](results_gemini/summary.md) (Gemini). Per-question logs (`*.jsonl`) include every SQL attempt, diagnostic and error.
 
 ## Safety
 
@@ -162,6 +190,8 @@ tests/           safety, scoring, agent loop and runner tests
 ```
 
 ## Limits
+
+- **The repair loop only sees failures it can detect** (errors and empty results). Wrong-but-running queries, the largest error category, need a different signal. Self-consistency voting across several drafts, or BIRD's column descriptions in the schema, are the natural next steps.
 
 - **Scope of the numbers:** BIRD Mini-Dev measures text-to-SQL on its own databases. The numbers don't promise the same accuracy on any company's data.
 - **Demo data:** the demo shop is synthetic (generated with a fixed seed).
