@@ -13,14 +13,15 @@ It runs **entirely locally on open-weight models**: no API cost, and the data ne
 ## What it does
 
 ```
-question ─▶ draft SQL ─▶ run it ─┬─ rows returned ─────────────────────────────▶ answer
-                                 └─ error / 0 rows ─▶ repair loop with tools ─▶ answer
-                                    (think ─▶ list/describe/sample/run ─▶ submit ─▶ verify)
+question ─▶ draft ─▶ execute ─┬─ rows returned ───────────────────────────────────▶ answer
+                              └─ error / 0 rows ─▶ diagnose (database tools) ─▶ revise ─┐
+                                        ▲                                               │
+                                        └──────────────── execute ◀─────────────────────┘
 ```
 
-- **Execution-guided.** The agent first drafts a query exactly as a one-shot model would, then runs it. A query that executes and returns rows is kept as it is. The agent only switches to its tools when there is evidence of failure (an error or an empty result), so it never talks itself out of a working answer.
+- **Execution-guided.** The query is drafted exactly as a one-shot model would write it, then run. A query that returns rows is kept as it is, so a working answer is never rewritten.
+- **Diagnoses failures with database tools.** On an error or an empty result, the workflow gathers evidence: similarly named columns for "no such column", the real table list for "no such table", the actual values of a filtered column when a query returns 0 rows, and sample rows. The model then revises the query from that evidence, up to 3 times. The workflow runs the tools itself, because small local models are unreliable at choosing tools on their own.
 
-- **Repairs with tools.** Tools: `list_tables`, `describe_table`, `sample_rows`, `run_sql` (exploration) and `submit_sql` (final answer). It checks real values, for example that a status is stored as `'delivered'` and not `'Delivered'`, before filtering on them.
 - **Verifies and self-repairs.** A submitted query is executed. If it fails or returns nothing, the agent gets the error back and fixes the query (up to 3 repairs).
 - **Routes between models for efficiency.** It starts on a small model (Qwen2.5-Coder 3B) and escalates to the larger one (7B) only when verification fails or the step budget runs out.
 - **Read-only by construction** (see [Safety](#safety)).
@@ -44,8 +45,8 @@ The web app shows the agent's trace live: every tool call, failed query, repair 
 | Setup | Description |
 |---|---|
 | `one_shot` | The 7B model writes the SQL in one call. No tools, no repair. |
-| `agent` | Full agent loop on the 7B model. |
-| `routed` | Same agent, starting on the 3B model, escalating to 7B when needed. |
+| `agent` | Draft, execute, diagnose and revise, all on the 7B model. |
+| `routed` | Same workflow: the small model drafts, and the 7B model takes over to repair. |
 
 **Fairness rules:**
 - All setups get the same question, the same evidence hint and the same schema text: table definitions plus 2 example rows per table. The agent's only advantage is its tools and self-repair.
@@ -54,7 +55,11 @@ The web app shows the agent's trace live: every tool call, failed query, repair 
 - **Efficiency is measured in tokens and time per question** (local models have no per-call price).
 - Prompts were not tuned on the 500 test questions.
 
-**A design change, stated openly.** A first pilot run of an "explore first" agent on 16 of the test questions rewrote correct answers into wrong ones. The agent was then changed to the execution-guided design above, which is a general rule, not tuned to any specific question. All reported agent numbers come from a fresh run of the final design.
+**Design changes, stated openly.** Two earlier designs were tried in pilot runs on test questions:
+1. An "explore first" agent rewrote correct answers into wrong ones.
+2. A version where the model chose its own tools to repair failures fixed 0 of the first 7 failed queries: the 7B model wandered through exploration steps without ever submitting a fix.
+
+The final design keeps working answers and runs the diagnostics itself. These are general rules, not tuned to any specific question. All reported agent numbers come from a fresh run of the final design.
 
 **Scoring** follows BIRD's official `evaluation_ex.py`:
 - A prediction is correct if `set(predicted_rows) == set(reference_rows)`, so row order and duplicates are ignored.

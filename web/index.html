@@ -413,7 +413,7 @@ function addStep(e) {
     body = `<span class="k">${esc(e.name)}</span> ${arg && e.name !== "run_sql" ? arg : ""}` +
       (e.name === "run_sql" ? `<pre>${arg}</pre>` : "") + `<pre>${esc(e.output)}</pre>`;
   }
-  else if (e.type === "submit") body = `<span class="k">submit final query</span><pre>${esc(e.sql)}</pre>`;
+  else if (e.type === "submit") body = `<span class="k">revised query</span><pre>${esc(e.sql)}</pre>`;
   else if (e.type === "draft") { ic = "✎"; cls = "sub"; body = `<span class="k">first draft</span> · ${esc(e.model || "")}<pre>${esc(e.sql)}</pre>`; }
   else if (e.type === "verify") {
     if (e.status !== "ok") { cls = e.status === "empty" ? "up" : "bad"; ic = e.status === "empty" ? "∅" : "✗"; }
