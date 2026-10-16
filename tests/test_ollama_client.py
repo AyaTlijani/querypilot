@@ -47,3 +47,38 @@ def test_missing_model_gives_clear_message(monkeypatch):
 def test_text_tool_call_parser():
     assert llm.parse_text_tool_calls('<tool_call>{"name": "list_tables", "arguments": {}}</tool_call>')[0]["name"] == "list_tables"
     assert llm.parse_text_tool_calls("I think the answer is 42.") == []
+
+
+def test_gemini_paces_and_stops_on_daily_quota(monkeypatch):
+    calls = []
+    responses = [
+        Resp({"model": "gemini-x", "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+              "choices": [{"message": {"content": "```sql\nSELECT 1\n```"}}]}),
+        Resp({"error": "Quota exceeded for metric: generate_content requests per day"}, 429),
+    ]
+    responses[1].text = "Quota exceeded ... GenerateRequestsPerDay"
+    monkeypatch.setattr(llm.requests, "post", lambda *a, **k: (calls.append(k), responses.pop(0))[1])
+    monkeypatch.setattr(llm.time, "sleep", lambda s: None)
+    client = llm.GeminiClient(api_key="k")
+    reply = client.chat([{"role": "user", "content": "q"}], model="gemini-x")
+    assert reply.content.startswith("```sql") and reply.prompt_tokens == 10 and reply.cost_usd == 0
+    try:
+        client.chat([{"role": "user", "content": "q"}], model="gemini-x")
+        assert False
+    except llm.QuotaExhausted:
+        pass
+
+
+def test_quota_stop_records_nothing(shop, tmp_path, monkeypatch):
+    from querypilot import evaluate
+
+    class Quota:
+        def chat(self, *a, **k):
+            raise llm.QuotaExhausted("done for today")
+
+    import querypilot.demo as demo
+    monkeypatch.setattr(demo, "offline_llm", lambda: Quota())
+    out = tmp_path / "r"
+    evaluate.main(["--data", str(shop["questions"]), "--db-root", str(shop["root"]),
+                   "--out", str(out), "--fake", "--yes", "--setups", "one_shot"])
+    assert not (out / "one_shot.jsonl").exists() or not (out / "one_shot.jsonl").read_text().strip()
