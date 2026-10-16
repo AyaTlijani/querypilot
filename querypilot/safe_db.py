@@ -73,11 +73,18 @@ def check_sql(sql: str) -> str:
     if len(statements) != 1:
         raise UnsafeQueryError("Only one statement per query is allowed.")
     stmt = statements[0]
+    if isinstance(stmt, exp.Command):
+        # sqlglot couldn't model this statement: same strict text rule as above.
+        if _FALLBACK_OK.match(text):
+            return text
+        raise UnsafeQueryError("Only SELECT queries are allowed.")
     if not isinstance(stmt, (exp.Select, exp.Union, exp.Intersect, exp.Except)):
         # WITH ... SELECT parses as a Select carrying a `with` arg.
         raise UnsafeQueryError("Only SELECT queries are allowed.")
-    forbidden = (exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Create,
-                 exp.Alter, exp.Command, exp.Pragma)
+    # A write can't hide inside a SELECT in SQLite, and the engine layers block
+    # writes anyway; this scan only catches odd parses. (Unsupported functions
+    # inside a valid SELECT are not writes and are not rejected.)
+    forbidden = (exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Create, exp.Alter, exp.Pragma)
     if any(True for _ in stmt.find_all(*forbidden)):
         raise UnsafeQueryError("Only SELECT queries are allowed.")
     return text

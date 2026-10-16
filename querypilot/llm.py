@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -45,7 +46,12 @@ else:
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
 
-class QuotaExhausted(RuntimeError):
+class StopRun(RuntimeError):
+    """The model can't be reached right now (network, quota, server down).
+    The benchmark stops and resumes later, instead of scoring questions as wrong."""
+
+
+class QuotaExhausted(StopRun):
     """The provider's daily quota is used up: stop the run, resume later."""
 
 
@@ -189,7 +195,11 @@ class OllamaClient:
         if tools:
             body["tools"] = tools
         start = time.monotonic()
-        resp = requests.post(f"{self.url}/api/chat", json=body, timeout=600)
+        try:
+            resp = requests.post(f"{self.url}/api/chat", json=body, timeout=600)
+        except (requests.ConnectionError, requests.Timeout) as err:
+            raise StopRun("Ollama stopped responding. Open the Ollama app, then run the "
+                          "same command again to resume.") from err
         if resp.status_code == 404:
             raise RuntimeError(f"Model '{model}' is not installed. Run: ollama pull {model}")
         if resp.status_code == 400 and "support tools" in resp.text:
@@ -240,22 +250,27 @@ class GeminiClient:
         body = {"model": model, "messages": [{"role": m["role"], "content": m.get("content") or ""}
                                              for m in messages], "temperature": temperature}
         start = time.monotonic()
-        for attempt in range(6):
+        for attempt in range(10):
             wait = self._last + self.min_gap - time.monotonic()
             if wait > 0:
                 time.sleep(wait)          # stay under the requests-per-minute limit
             self._last = time.monotonic()
-            resp = requests.post(GEMINI_URL, json=body, timeout=120,
-                                 headers={"Authorization": f"Bearer {self.api_key}"})
+            try:
+                resp = requests.post(GEMINI_URL, json=body, timeout=120,
+                                     headers={"Authorization": f"Bearer {self.api_key}"})
+            except (requests.ConnectionError, requests.Timeout):
+                time.sleep(min(60, 10 * (attempt + 1)))
+                continue
             if resp.status_code == 429:
                 text = resp.text.lower()
                 if "per day" in text or "perday" in text or "daily" in text:
                     raise QuotaExhausted("Gemini daily quota reached. Run the same command "
                                          "again after the reset (midnight Pacific time).")
-                time.sleep(min(60, 10 * (attempt + 1)))
+                hint = re.search(r'retrydelay"?\s*:\s*"?(\d+)', text)
+                time.sleep(min(90, int(hint.group(1)) + 2 if hint else 15 * (attempt + 1)))
                 continue
             if resp.status_code in (500, 502, 503, 504):
-                time.sleep(5 * (attempt + 1))
+                time.sleep(min(60, 10 * (attempt + 1)))
                 continue
             if resp.status_code == 404:
                 raise RuntimeError(f"Gemini model '{model}' not found. Check the exact model name "
@@ -263,7 +278,8 @@ class GeminiClient:
             resp.raise_for_status()
             break
         else:
-            raise RuntimeError("Gemini kept refusing requests (rate limit). Try again later.")
+            raise StopRun("Gemini kept refusing or failing requests. Run the same command "
+                          "again later to resume.")
         data = resp.json()
         usage = data.get("usage", {})
         content = data["choices"][0]["message"].get("content") or ""

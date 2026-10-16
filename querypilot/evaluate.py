@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .agent import Agent, one_shot
-from .llm import QuotaExhausted
+from .llm import StopRun
 from .safe_db import SafeDB
 from .scoring import score
 
@@ -66,7 +66,7 @@ def run_one(setup: str, llm, db: SafeDB, q: dict, schema: str, use_evidence: boo
             agent = Agent(llm, db, routed=(setup == "routed"), emit=trace.append)
             out = agent.run(q["question"], evidence, schema)
         api_error = ""
-    except QuotaExhausted:
+    except StopRun:
         raise                      # stop the run; nothing is recorded for this question
     except Exception as err:  # API failures are recorded, never dropped
         out, api_error = {"final_sql": "", "cost": 0.0, "tokens": 0, "calls": 0, "models_used": [],
@@ -211,7 +211,7 @@ def main(argv=None):
                 schemas[q["db_id"]] = dbs[q["db_id"]].schema_context()
             try:
                 rec = run_one(setup, llm, dbs[q["db_id"]], q, schemas[q["db_id"]], not args.no_evidence)
-            except QuotaExhausted as err:
+            except StopRun as err:
                 print(f"\n{err}")
                 stop = True
                 break
