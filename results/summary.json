@@ -1,0 +1,128 @@
+{
+  "meta": {
+    "date": "2026-10-16 08:54 UTC",
+    "evidence": true,
+    "data": "data\\minidev\\MINIDEV\\mini_dev_sqlite.json",
+    "sample": "all"
+  },
+  "setups": {
+    "one_shot": {
+      "n": 200,
+      "ex": 47.0,
+      "by_difficulty": {
+        "challenging": {
+          "n": 31,
+          "ex": 38.7
+        },
+        "moderate": {
+          "n": 98,
+          "ex": 43.9
+        },
+        "simple": {
+          "n": 71,
+          "ex": 54.9
+        }
+      },
+      "categories": {
+        "correct": 94,
+        "wrong_logic": 37,
+        "sql_error": 27,
+        "wrong_tables": 21,
+        "empty_result": 13,
+        "wrong_columns": 8
+      },
+      "near_misses_not_counted": 6,
+      "gold_empty": 0,
+      "api_errors": 0,
+      "total_cost_usd": 0.0,
+      "cost_per_question_usd": 0.0,
+      "tokens_per_question": 2109,
+      "avg_latency_s": 122.68,
+      "median_latency_s": 14.16,
+      "avg_llm_calls": 1,
+      "escalation_rate": 0.0,
+      "models": [
+        "qwen2.5-coder:7b"
+      ]
+    },
+    "agent": {
+      "n": 200,
+      "ex": 51.0,
+      "by_difficulty": {
+        "challenging": {
+          "n": 31,
+          "ex": 41.9
+        },
+        "moderate": {
+          "n": 98,
+          "ex": 49.0
+        },
+        "simple": {
+          "n": 71,
+          "ex": 57.7
+        }
+      },
+      "categories": {
+        "correct": 102,
+        "wrong_logic": 39,
+        "wrong_tables": 29,
+        "sql_error": 10,
+        "wrong_columns": 10,
+        "empty_result": 10
+      },
+      "near_misses_not_counted": 6,
+      "gold_empty": 0,
+      "api_errors": 0,
+      "total_cost_usd": 0.0,
+      "cost_per_question_usd": 0.0,
+      "tokens_per_question": 3188,
+      "avg_latency_s": 26.08,
+      "median_latency_s": 13.04,
+      "avg_llm_calls": 1.33,
+      "escalation_rate": 0.0,
+      "models": [
+        "qwen2.5-coder:7b"
+      ]
+    },
+    "routed": {
+      "n": 200,
+      "ex": 40.0,
+      "by_difficulty": {
+        "challenging": {
+          "n": 31,
+          "ex": 41.9
+        },
+        "moderate": {
+          "n": 98,
+          "ex": 31.6
+        },
+        "simple": {
+          "n": 71,
+          "ex": 50.7
+        }
+      },
+      "categories": {
+        "correct": 80,
+        "wrong_logic": 38,
+        "wrong_tables": 33,
+        "sql_error": 21,
+        "empty_result": 19,
+        "wrong_columns": 9
+      },
+      "near_misses_not_counted": 6,
+      "gold_empty": 0,
+      "api_errors": 0,
+      "total_cost_usd": 0.0,
+      "cost_per_question_usd": 0.0,
+      "tokens_per_question": 4990,
+      "avg_latency_s": 31.76,
+      "median_latency_s": 21.61,
+      "avg_llm_calls": 1.92,
+      "escalation_rate": 56.0,
+      "models": [
+        "qwen2.5-coder:1.5b",
+        "qwen2.5-coder:7b"
+      ]
+    }
+  }
+}
