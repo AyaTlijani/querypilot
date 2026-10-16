@@ -1,17 +1,4 @@
-"""Read-only, sandboxed access to SQLite databases.
-
-Every query the agent (or anyone) runs goes through `SafeDB.query`.
-Writes are blocked by several independent layers, so a trick that gets
-past one layer is still stopped by the next:
-
-1. The file is opened with SQLite's read-only URI mode (`mode=ro`).
-2. `PRAGMA query_only = ON` makes the connection refuse any write.
-3. An authorizer callback whitelists read operations only. Writes, schema
-   changes, ATTACH, and PRAGMA statements are denied inside the engine itself.
-4. The SQL text must parse as exactly ONE statement, and it must be a SELECT
-   (WITH ... SELECT is fine).
-5. A progress handler enforces a time limit, and results are capped in rows.
-"""
+"""Read-only access to SQLite databases, with several layers that block any write."""
 
 from __future__ import annotations
 
@@ -29,7 +16,6 @@ _FALLBACK_OK = re.compile(r"^\s*(SELECT|WITH)\b", re.IGNORECASE)
 DEFAULT_TIMEOUT_S = 30.0
 DEFAULT_MAX_ROWS = 1000
 
-# Operations a pure read needs. Everything else is denied.
 _ALLOWED_ACTIONS = {
     sqlite3.SQLITE_SELECT,
     sqlite3.SQLITE_READ,
@@ -39,15 +25,16 @@ _ALLOWED_ACTIONS = {
 
 
 class UnsafeQueryError(ValueError):
-    """The query was rejected before or during execution for safety reasons."""
+    """Raised when a query is not a single read-only SELECT."""
 
 
 class QueryTimeoutError(TimeoutError):
-    """The query ran longer than the allowed time."""
+    """Raised when a query runs longer than the time limit."""
 
 
 @dataclass
 class QueryResult:
+    """The columns and rows a query returned."""
     columns: list[str]
     rows: list[tuple]
     truncated: bool = False
@@ -56,17 +43,13 @@ class QueryResult:
 
 
 def check_sql(sql: str) -> str:
-    """Return the cleaned SQL if it is a single read-only statement, else raise."""
+    """Accept only a single SELECT statement; reject everything else."""
     text = (sql or "").strip().rstrip(";").strip()
     if not text:
         raise UnsafeQueryError("Empty query.")
     try:
         statements = [s for s in sqlglot.parse(text, read="sqlite") if s is not None]
     except sqlglot.errors.ParseError:
-        # The parser doesn't know every SQLite construct. Rejecting valid SQL
-        # would unfairly lower benchmark scores, so fall back to a strict text
-        # rule. The engine-level layers (read-only file, query_only, authorizer)
-        # still block any write.
         if _FALLBACK_OK.match(text) and ";" not in text:
             return text
         raise UnsafeQueryError("Only single SELECT queries are allowed.")
@@ -74,27 +57,22 @@ def check_sql(sql: str) -> str:
         raise UnsafeQueryError("Only one statement per query is allowed.")
     stmt = statements[0]
     if isinstance(stmt, exp.Command):
-        # sqlglot couldn't model this statement: same strict text rule as above.
         if _FALLBACK_OK.match(text):
             return text
         raise UnsafeQueryError("Only SELECT queries are allowed.")
     if not isinstance(stmt, (exp.Select, exp.Union, exp.Intersect, exp.Except)):
-        # WITH ... SELECT parses as a Select carrying a `with` arg.
         raise UnsafeQueryError("Only SELECT queries are allowed.")
-    # A write can't hide inside a SELECT in SQLite, and the engine layers block
-    # writes anyway; this scan only catches odd parses. (Unsupported functions
-    # inside a valid SELECT are not writes and are not rejected.)
     forbidden = (exp.Insert, exp.Update, exp.Delete, exp.Drop, exp.Create, exp.Alter, exp.Pragma)
     if any(True for _ in stmt.find_all(*forbidden)):
         raise UnsafeQueryError("Only SELECT queries are allowed.")
     return text
 
 
-# Read-only pragmas, reachable only as table functions like pragma_table_info().
 _READ_PRAGMAS = {"table_info", "table_xinfo", "foreign_key_list", "index_list", "index_info"}
 
 
 def _authorizer(action, arg1, arg2, db_name, trigger):
+    """Let SQLite allow read operations only."""
     if action in _ALLOWED_ACTIONS:
         return sqlite3.SQLITE_OK
     if action == sqlite3.SQLITE_PRAGMA and (arg1 or "").lower() in _READ_PRAGMAS:
@@ -103,14 +81,16 @@ def _authorizer(action, arg1, arg2, db_name, trigger):
 
 
 class SafeDB:
-    """A read-only handle on one SQLite file."""
+    """A read-only connection to one SQLite file."""
 
     def __init__(self, path: str | Path):
+        """Remember the database file, failing if it doesn't exist."""
         self.path = Path(path)
         if not self.path.is_file():
             raise FileNotFoundError(f"Database not found: {self.path}")
 
     def _connect(self) -> sqlite3.Connection:
+        """Open the file read-only, with writes blocked inside SQLite."""
         uri = f"file:{self.path.resolve().as_posix()}?mode=ro"
         conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
         conn.execute("PRAGMA query_only = ON")
@@ -119,9 +99,7 @@ class SafeDB:
 
     def query(self, sql: str, timeout_s: float = DEFAULT_TIMEOUT_S,
               max_rows: int = DEFAULT_MAX_ROWS, checked: bool = True) -> QueryResult:
-        """Run one read-only query. `checked=False` skips only the text check
-        (used for trusted benchmark reference SQL); the engine-level
-        protections always stay on."""
+        """Run one read-only query with a time limit and a row limit."""
         text = check_sql(sql) if checked else sql
         conn = self._connect()
         deadline = time.monotonic() + timeout_s
@@ -146,32 +124,34 @@ class SafeDB:
         truncated = len(rows) > max_rows
         return QueryResult(columns, rows[:max_rows], truncated, time.monotonic() - start)
 
-    # ---- schema helpers (all read-only) -------------------------------------
-
     def tables(self) -> list[str]:
+        """List the table names."""
         res = self.query("SELECT name FROM sqlite_master WHERE type='table' "
                          "AND name NOT LIKE 'sqlite_%' ORDER BY name")
         return [r[0] for r in res.rows]
 
     def ddl(self) -> str:
+        """Return the CREATE TABLE statements."""
         res = self.query("SELECT sql FROM sqlite_master WHERE type='table' "
                          "AND name NOT LIKE 'sqlite_%' ORDER BY name")
         return "\n\n".join(r[0] for r in res.rows if r[0])
 
     def describe(self, table: str) -> list[tuple]:
+        """List a table's columns and types."""
         if table not in self.tables():
             raise UnsafeQueryError(f"Unknown table: {table}")
         safe_name = table.replace("'", "''")
         return self.query(f"SELECT name, type FROM pragma_table_info('{safe_name}')").rows
 
     def sample(self, table: str, n: int = 3) -> QueryResult:
+        """Return a few rows from a table."""
         if table not in self.tables():
             raise UnsafeQueryError(f"Unknown table: {table}")
         safe_name = table.replace('"', '""')
         return self.query(f'SELECT * FROM "{safe_name}" LIMIT {int(n)}')
 
     def schema_context(self, sample_rows: int = 2) -> str:
-        """The schema text given to EVERY setup (same context for all)."""
+        """Build the schema text given to the model: tables plus example rows."""
         parts = []
         for t in self.tables():
             safe_name = t.replace("'", "''")
@@ -188,5 +168,6 @@ class SafeDB:
 
 
 def _short(value, limit: int = 40) -> str:
+    """Shorten a long value for display."""
     s = "NULL" if value is None else str(value)
     return s if len(s) <= limit else s[: limit - 1] + "…"

@@ -1,27 +1,4 @@
-"""The QueryPilot agent and the one-shot baseline.
-
-Execution-guided self-correction, as a LangGraph workflow:
-
-    draft -> execute --(rows)-------------------------------------------> done
-                 '--(error / 0 rows)--> diagnose (database tools) --> revise -> execute ...
-
-  * draft    : the query is written exactly like the one-shot baseline
-  * execute  : it runs in the read-only sandbox; a query that returns rows is kept,
-               so a working answer is never rewritten
-  * diagnose : the workflow itself calls database tools to gather evidence for the
-               failure (similar column names, real table names, the actual values of
-               a column the query filtered on, sample rows)
-  * revise   : the model rewrites the query from that evidence (up to 3 times)
-
-The tools are run by the workflow, not chosen by the model. Small local models are
-unreliable at deciding which tool to call; given the evidence directly, they fix
-far more errors.
-
-Three setups share the exact same inputs (question, evidence, schema text):
-  * one_shot : one call to the large model
-  * agent    : the workflow above, large model throughout
-  * routed   : drafts with the small model, escalates to the large one to repair
-"""
+"""The text-to-SQL agent (draft, run, diagnose, revise) and the one-shot baseline."""
 
 from __future__ import annotations
 
@@ -36,7 +13,7 @@ from sqlglot import exp
 from .llm import LARGE, SMALL
 from .safe_db import SafeDB
 
-MAX_REPAIRS = 3     # revisions after a failed query
+MAX_REPAIRS = 3
 PREVIEW_ROWS = 20
 
 RULES = """You translate questions into SQLite queries.
@@ -56,6 +33,7 @@ Reply with the corrected query only, inside a ```sql code block."""
 
 
 def user_message(question: str, evidence: str, schema: str) -> str:
+    """Build the prompt text: schema, optional hint, and the question."""
     parts = [f"Database schema:\n{schema}"]
     if evidence:
         parts.append(f"Evidence: {evidence}")
@@ -68,19 +46,16 @@ _SQL_START = re.compile(r"\b(WITH|SELECT)\b", re.I)
 
 
 def extract_sql(text: str) -> str:
-    """The query from a model reply. Handles ```sql, ```sqlite and other fence labels,
-    and replies without a fence. Never fails a correct query because of formatting."""
+    """Pull the SQL query out of a model reply, whatever code-block format it uses."""
     text = text or ""
     m = re.search(r"```[ \t]*([A-Za-z0-9_+-]*)[ \t]*\n?(.*?)```", text, re.S)
     if m:
         tag, body = m.group(1), m.group(2)
-        if tag.lower() not in _LANG_TAGS:          # e.g. ```SELECT ... on one line
+        if tag.lower() not in _LANG_TAGS:
             body = f"{tag} {body}"
     else:
         start = _SQL_START.search(text)
         body = text[start.start():] if start else text
-    # Some models repeat the language label on its own line inside the block
-    # ("```\nsql\nSELECT ..."); drop any such label lines before the query.
     lines = body.strip().splitlines()
     while lines and lines[0].strip().lower() in _LANG_TAGS - {""}:
         lines.pop(0)
@@ -88,6 +63,7 @@ def extract_sql(text: str) -> str:
 
 
 def _table(res, limit=PREVIEW_ROWS) -> str:
+    """Format a query result as a short text table."""
     rows = res.rows[:limit]
     out = [" | ".join(res.columns)] + [" | ".join(str(v) for v in r) for r in rows]
     more = len(res.rows) - len(rows)
@@ -96,15 +72,13 @@ def _table(res, limit=PREVIEW_ROWS) -> str:
     return "\n".join(out) if res.columns else "(no rows)"
 
 
-# ---------------------------------------------------------------------------
-# Database diagnostics (the tools the workflow runs after a failure)
-# ---------------------------------------------------------------------------
-
 def _q(name: str) -> str:
+    """Quote a table or column name for SQL."""
     return '"' + name.replace('"', '""') + '"'
 
 
 def _parse(sql: str):
+    """Parse SQL into a tree, or return None if it can't be parsed."""
     try:
         return sqlglot.parse_one(sql, read="sqlite")
     except Exception:
@@ -112,7 +86,7 @@ def _parse(sql: str):
 
 
 def diagnose(db: SafeDB, sql: str, status: str, error: str) -> list[dict]:
-    """Gather evidence about why `sql` failed. Each item: {name, args, output}."""
+    """Collect evidence about why a query failed: similar columns, real tables, real values, sample rows."""
     tables = db.tables()
     by_lower = {t.lower(): t for t in tables}
     tree = _parse(sql)
@@ -125,6 +99,7 @@ def diagnose(db: SafeDB, sql: str, status: str, error: str) -> list[dict]:
     found: list[dict] = []
 
     def add(name, args, output):
+        """Add one diagnostic result to the list."""
         found.append({"name": name, "args": args, "output": output[:1500]})
 
     if status == "error":
@@ -179,11 +154,8 @@ def diagnose(db: SafeDB, sql: str, status: str, error: str) -> list[dict]:
     return found
 
 
-# ---------------------------------------------------------------------------
-# Workflow
-# ---------------------------------------------------------------------------
-
 class Run(TypedDict, total=False):
+    """The state passed between the agent's steps."""
     ask: str
     messages: list
     model: str
@@ -191,7 +163,7 @@ class Run(TypedDict, total=False):
     final_sql: str
     columns: list
     rows: list
-    status: str          # ok | empty | error
+    status: str
     error: str
     repairs: int
     escalated: bool
@@ -203,13 +175,17 @@ class Run(TypedDict, total=False):
 
 
 class Agent:
+    """The agent: drafts a query, runs it, and repairs it when it fails."""
+
     def __init__(self, llm, db: SafeDB, routed: bool = False,
                  emit: Callable[[dict], None] | None = None):
+        """Set up the agent with a model, a database and an optional event callback."""
         self.llm, self.db, self.routed = llm, db, routed
         self.emit = emit or (lambda e: None)
         self.graph = self._build()
 
     def _chat(self, s: Run, messages: list) -> str:
+        """Call the model and keep count of calls, tokens and cost."""
         reply = self.llm.chat(messages, model=s["model"])
         s["cost"] += reply.cost_usd
         s["tokens"] += reply.prompt_tokens + reply.completion_tokens
@@ -218,8 +194,8 @@ class Agent:
             s["models_used"].append(reply.model)
         return reply.content
 
-    # -- nodes ---------------------------------------------------------------
     def draft(self, s: Run) -> Run:
+        """Write the first query, exactly like the one-shot baseline."""
         content = self._chat(s, [{"role": "system", "content": ONE_SHOT_PROMPT},
                                  {"role": "user", "content": s["ask"]}])
         s["sql"] = extract_sql(content)
@@ -227,6 +203,7 @@ class Agent:
         return s
 
     def execute(self, s: Run) -> Run:
+        """Run the current query and record its result or error."""
         s["final_sql"] = s["sql"]
         try:
             res = self.db.query(s["sql"])
@@ -239,7 +216,8 @@ class Agent:
                    "rows": len(s["rows"])})
         return s
 
-    def diagnose(self, s: Run) -> Run:
+    def diagnose_step(self, s: Run) -> Run:
+        """Gather diagnostics for the failed query and prepare the repair prompt."""
         s["repairs"] += 1
         if s["status"] == "empty":
             s["empty_checked"] = True
@@ -265,24 +243,27 @@ class Agent:
         return s
 
     def revise(self, s: Run) -> Run:
+        """Ask the model for a corrected query."""
         s["sql"] = extract_sql(self._chat(s, s["messages"]))
         self.emit({"type": "submit", "sql": s["sql"]})
         return s
 
     def after_execute(self, s: Run) -> str:
+        """Decide whether to stop or repair after running a query."""
         if s["status"] == "ok":
             return END
         if s["status"] == "empty" and s.get("empty_checked"):
-            return END   # already re-checked once: an empty answer can be correct
+            return END
         if s["repairs"] >= MAX_REPAIRS:
             return END
         return "diagnose"
 
     def _build(self):
+        """Wire the steps into a LangGraph workflow."""
         g = StateGraph(Run)
         g.add_node("draft", self.draft)
         g.add_node("execute", self.execute)
-        g.add_node("diagnose", self.diagnose)
+        g.add_node("diagnose", self.diagnose_step)
         g.add_node("revise", self.revise)
         g.set_entry_point("draft")
         g.add_edge("draft", "execute")
@@ -291,8 +272,8 @@ class Agent:
         g.add_edge("revise", "execute")
         return g.compile()
 
-    # -- public --------------------------------------------------------------
     def run(self, question: str, evidence: str = "", schema: str | None = None) -> Run:
+        """Answer one question and return the final query, result and stats."""
         schema = schema if schema is not None else self.db.schema_context()
         s: Run = {
             "ask": user_message(question, evidence, schema), "messages": [],
@@ -312,6 +293,7 @@ class Agent:
 
 def one_shot(llm, db: SafeDB, question: str, evidence: str = "",
              schema: str | None = None) -> Run:
+    """Baseline: ask the model once and return its query, with no repair."""
     schema = schema if schema is not None else db.schema_context()
     messages = [{"role": "system", "content": ONE_SHOT_PROMPT},
                 {"role": "user", "content": user_message(question, evidence, schema)}]
@@ -323,7 +305,7 @@ def one_shot(llm, db: SafeDB, question: str, evidence: str = "",
 
 
 def summarize(llm, question: str, columns: list, rows: list) -> str:
-    """One-sentence plain-language answer for the demo (not used in the benchmark)."""
+    """Turn a query result into a one-sentence answer for the web app."""
     preview = json.dumps({"columns": columns, "rows": rows[:10]}, default=str)
     reply = llm.chat([
         {"role": "system", "content": "Answer the question in one or two plain sentences "

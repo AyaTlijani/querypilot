@@ -1,3 +1,5 @@
+"""Shared test fixtures: a tiny sample database and questions file."""
+
 import json
 import sqlite3
 import sys
@@ -10,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 @pytest.fixture
 def shop(tmp_path):
-    """Tiny BIRD-style database + questions file."""
+    """Create a tiny sample database and questions file for tests."""
     root = tmp_path / "dbs" / "shop"
     root.mkdir(parents=True)
     path = root / "shop.sqlite"

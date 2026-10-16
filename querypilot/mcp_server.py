@@ -1,18 +1,12 @@
-"""The agent's database tools, exposed over the Model Context Protocol (MCP).
-
-Any MCP client (Claude Desktop, IDEs, other agents) can explore a database
-through the same read-only sandbox the agent uses.
-
-    QP_DB=data/demo/shop.sqlite python -m querypilot.mcp_server
-"""
+"""Exposes the read-only database tools over the Model Context Protocol (MCP)."""
 
 from __future__ import annotations
 
 import os
 
-try:  # MCP Python SDK 2.x
+try:
     from mcp.server.mcpserver import MCPServer as FastMCP
-except ImportError:  # 1.x
+except ImportError:
     from mcp.server.fastmcp import FastMCP
 
 from .agent import _table
@@ -30,13 +24,13 @@ def list_tables() -> str:
 
 @mcp.tool()
 def describe_table(table: str) -> str:
-    """Columns and types of one table."""
+    """List the columns and types of one table."""
     return "\n".join(f"{c} {t}" for c, t in db.describe(table))
 
 
 @mcp.tool()
 def sample_rows(table: str, n: int = 5) -> str:
-    """A few real rows from a table (max 20)."""
+    """Return a few real rows from a table (max 20)."""
     return _table(db.sample(table, min(n, 20)))
 
 

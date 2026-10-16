@@ -1,12 +1,4 @@
-"""Benchmark runner: BIRD Mini-Dev (SQLite), three setups, same inputs.
-
-    python -m querypilot.evaluate --data data/minidev/MINIDEV/mini_dev_sqlite.json \
-        --db-root data/minidev/MINIDEV/dev_databases
-
-Results are appended to results/<setup>.jsonl after every question, so an
-interrupted run resumes where it stopped. results/summary.json and
-results/summary.md are rebuilt from the logs at the end (or with --summary-only).
-"""
+"""Runs the BIRD benchmark for each setup and writes per-question logs and a summary."""
 
 from __future__ import annotations
 
@@ -29,13 +21,12 @@ SETUPS = ("one_shot", "agent", "routed")
 
 def load_questions(path: Path, limit: int | None, sample: int | None = None,
                    seed: int = 42) -> list[dict]:
+    """Load the benchmark questions, optionally a fixed random sample."""
     items = json.loads(path.read_text(encoding="utf-8"))
     for i, q in enumerate(items):
         q.setdefault("question_id", i)
         q.setdefault("difficulty", "unknown")
     if sample and sample < len(items):
-        # Fixed random subset (same seed -> same questions every run), spread
-        # over all databases and difficulties instead of the first N in file order.
         import random
         picked = random.Random(seed).sample(items, sample)
         items = sorted(picked, key=lambda q: q["question_id"])
@@ -43,6 +34,7 @@ def load_questions(path: Path, limit: int | None, sample: int | None = None,
 
 
 def find_db(root: Path, db_id: str) -> Path:
+    """Find the SQLite file for a database id."""
     for candidate in (root / db_id / f"{db_id}.sqlite", root / f"{db_id}.sqlite"):
         if candidate.is_file():
             return candidate
@@ -50,12 +42,14 @@ def find_db(root: Path, db_id: str) -> Path:
 
 
 def done_ids(path: Path) -> set:
+    """List question ids already answered, so a run can resume."""
     if not path.exists():
         return set()
     return {json.loads(line)["question_id"] for line in path.open(encoding="utf-8") if line.strip()}
 
 
 def run_one(setup: str, llm, db: SafeDB, q: dict, schema: str, use_evidence: bool) -> dict:
+    """Answer and score one question with one setup."""
     evidence = q.get("evidence", "") if use_evidence else ""
     trace: list[dict] = []
     start = time.monotonic()
@@ -67,8 +61,8 @@ def run_one(setup: str, llm, db: SafeDB, q: dict, schema: str, use_evidence: boo
             out = agent.run(q["question"], evidence, schema)
         api_error = ""
     except StopRun:
-        raise                      # stop the run; nothing is recorded for this question
-    except Exception as err:  # API failures are recorded, never dropped
+        raise
+    except Exception as err:
         out, api_error = {"final_sql": "", "cost": 0.0, "tokens": 0, "calls": 0, "models_used": [],
                           "escalated": False, "repairs": 0}, f"{type(err).__name__}: {err}"
     latency = time.monotonic() - start
@@ -88,6 +82,7 @@ def run_one(setup: str, llm, db: SafeDB, q: dict, schema: str, use_evidence: boo
 
 
 def summarize(out_dir: Path, meta: dict) -> dict:
+    """Compute accuracy, errors, time and tokens per setup and save the summary."""
     summary = {"meta": meta, "setups": {}}
     for setup in SETUPS:
         path = out_dir / f"{setup}.jsonl"
@@ -129,6 +124,7 @@ def summarize(out_dir: Path, meta: dict) -> dict:
 
 
 def to_markdown(summary: dict) -> str:
+    """Write the summary as a Markdown report."""
     m = summary["meta"]
     lines = [f"# QueryPilot — BIRD Mini-Dev results",
              "",
@@ -160,6 +156,7 @@ def to_markdown(summary: dict) -> str:
 
 
 def main(argv=None):
+    """Command-line entry point: run the benchmark or rebuild the summary."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", type=Path, default=Path("data/minidev/MINIDEV/mini_dev_sqlite.json"))
     ap.add_argument("--db-root", type=Path, default=Path("data/minidev/MINIDEV/dev_databases"))
@@ -202,8 +199,6 @@ def main(argv=None):
     total = sum(1 for s_ in setups for q in todo if q["question_id"] not in finished[s_])
     spent, done, checked, t0 = 0.0, 0, False, time.monotonic()
     stop = False
-    # One setup at a time: on a small GPU this keeps a single model loaded
-    # instead of swapping models on every question.
     for setup in setups:
         if stop:
             break

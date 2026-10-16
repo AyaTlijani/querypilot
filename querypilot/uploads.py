@@ -1,15 +1,4 @@
-"""Turn an uploaded CSV or Excel file into a small SQLite database the agent can query.
-
-The database is written once here, then only ever opened through SafeDB
-(read-only), exactly like the demo and benchmark databases.
-
-- CSV: delimiter (`,` `;` tab `|`) and encoding (UTF-8, Windows-1252) are detected.
-- Excel (.xlsx): every non-empty sheet becomes a table.
-- Column and table names are cleaned to safe SQL identifiers
-  ("Chiffre d'affaires (€)" -> chiffre_d_affaires).
-- Column types are inferred: INTEGER, REAL or TEXT. Decimal commas ("12,5")
-  are understood. Dates are stored as ISO text, so SQLite date functions work.
-"""
+"""Turns an uploaded CSV or Excel file into a small SQLite database."""
 
 from __future__ import annotations
 
@@ -33,14 +22,11 @@ DB_ID = re.compile(r"^[0-9a-f]{32}$")
 
 
 class UploadError(ValueError):
-    """The file can't be turned into a database (shown to the user as is)."""
+    """Raised when a file can't be turned into a database."""
 
-
-# ---------------------------------------------------------------------------
-# names
-# ---------------------------------------------------------------------------
 
 def clean_name(raw, fallback: str) -> str:
+    """Turn any header into a safe SQL name."""
     text = unicodedata.normalize("NFKD", str(raw or "")).encode("ascii", "ignore").decode()
     text = re.sub(r"[^0-9a-zA-Z]+", "_", text).strip("_").lower()
     if not text:
@@ -51,6 +37,7 @@ def clean_name(raw, fallback: str) -> str:
 
 
 def unique_names(raws: list, prefix: str) -> list[str]:
+    """Clean a list of names and make sure none repeat."""
     seen, out = set(), []
     for i, raw in enumerate(raws, 1):
         name = base = clean_name(raw, f"{prefix}_{i}")
@@ -63,18 +50,13 @@ def unique_names(raws: list, prefix: str) -> list[str]:
     return out
 
 
-# ---------------------------------------------------------------------------
-# values and types
-# ---------------------------------------------------------------------------
-
 _INT = re.compile(r"^[+-]?\d+$")
 _NUM = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$")
 _COMMA_DEC = re.compile(r"^[+-]?\d+,\d+$")
 
 
 def to_value(v):
-    """Normalise one cell: numbers stay numbers, numeric text becomes a number,
-    dates become ISO text, blanks become NULL."""
+    """Convert one cell to a number, ISO date text, text or empty."""
     if v is None:
         return None
     if isinstance(v, bool):
@@ -90,7 +72,7 @@ def to_value(v):
         return None
     compact = s.replace(" ", "").replace(" ", "")
     if _INT.match(compact):
-        return int(compact) if len(compact.lstrip("+-")) < 16 else s  # keep ids/phones as text
+        return int(compact) if len(compact.lstrip("+-")) < 16 else s
     if _COMMA_DEC.match(compact):
         return float(compact.replace(",", "."))
     if _NUM.match(compact):
@@ -99,6 +81,7 @@ def to_value(v):
 
 
 def column_type(values: list) -> str:
+    """Pick INTEGER, REAL or TEXT for a column from its values."""
     seen = [v for v in values if v is not None]
     if not seen:
         return "TEXT"
@@ -109,11 +92,8 @@ def column_type(values: list) -> str:
     return "TEXT"
 
 
-# ---------------------------------------------------------------------------
-# readers -> [(sheet_name, header, rows)]
-# ---------------------------------------------------------------------------
-
 def _decode(data: bytes) -> str:
+    """Read file bytes as text, trying common encodings."""
     for enc in ("utf-8-sig", "cp1252", "latin-1"):
         try:
             return data.decode(enc)
@@ -123,12 +103,14 @@ def _decode(data: bytes) -> str:
 
 
 def read_csv(data: bytes, name: str) -> list[tuple]:
+    """Read a CSV file, detecting its delimiter."""
     text = _decode(data)
     sample = text[:20_000]
     try:
         dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
     except csv.Error:
         class dialect(csv.excel):
+            """Fallback CSV format when the delimiter can't be detected."""
             delimiter = ";" if sample.count(";") > sample.count(",") else ","
     rows = [r for r in csv.reader(io.StringIO(text), dialect) if any(c.strip() for c in r)]
     if len(rows) < 2:
@@ -137,6 +119,7 @@ def read_csv(data: bytes, name: str) -> list[tuple]:
 
 
 def read_xlsx(data: bytes) -> list[tuple]:
+    """Read every non-empty sheet of an Excel file."""
     try:
         from openpyxl import load_workbook
         wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
@@ -154,11 +137,8 @@ def read_xlsx(data: bytes) -> list[tuple]:
     return sheets
 
 
-# ---------------------------------------------------------------------------
-# build
-# ---------------------------------------------------------------------------
-
 def cleanup(directory: Path = UPLOAD_DIR, hours: float = KEEP_HOURS) -> None:
+    """Delete uploaded databases older than 24 hours."""
     if not directory.exists():
         return
     cutoff = time.time() - hours * 3600
@@ -168,6 +148,7 @@ def cleanup(directory: Path = UPLOAD_DIR, hours: float = KEEP_HOURS) -> None:
 
 
 def build_database(data: bytes, filename: str, directory: Path = UPLOAD_DIR) -> dict:
+    """Convert a CSV or Excel file into a new SQLite database."""
     if not data:
         raise UploadError("The file is empty.")
     if len(data) > MAX_BYTES:
@@ -197,7 +178,6 @@ def build_database(data: bytes, filename: str, directory: Path = UPLOAD_DIR) -> 
                 rows, truncated = rows[:MAX_ROWS], True
             values = [[to_value(c) for c in (list(r) + [None] * width)[:width]] for r in rows]
             types = [column_type([row[i] for row in values]) for i in range(width)]
-            # Names are cleaned to [a-z0-9_] above, so quoting them is safe.
             ddl = ", ".join(f'"{c}" {t}' for c, t in zip(cols, types))
             con.execute(f'CREATE TABLE "{tname}" ({ddl})')
             con.executemany(f'INSERT INTO "{tname}" VALUES ({", ".join("?" * width)})', values)
@@ -213,6 +193,7 @@ def build_database(data: bytes, filename: str, directory: Path = UPLOAD_DIR) -> 
 
 
 def path_for(db_id: str, directory: Path = UPLOAD_DIR) -> Path | None:
+    """Find an uploaded database by its id, rejecting invalid ids."""
     if not db_id or not DB_ID.match(db_id):
         return None
     path = directory / f"{db_id}.sqlite"
@@ -220,7 +201,7 @@ def path_for(db_id: str, directory: Path = UPLOAD_DIR) -> Path | None:
 
 
 def suggest_questions(tables: list[dict]) -> list[str]:
-    """A few starter questions built from the uploaded columns."""
+    """Suggest a few starter questions from the uploaded columns."""
     out = []
     for t in tables[:2]:
         nums = [c for c, ty in zip(t["columns"], t["types"]) if ty in ("INTEGER", "REAL")

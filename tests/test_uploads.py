@@ -1,3 +1,5 @@
+"""Tests for turning CSV and Excel files into databases."""
+
 import hashlib
 import io
 
@@ -10,6 +12,7 @@ from querypilot.uploads import (UploadError, build_database, clean_name, path_fo
 
 
 def test_french_csv_semicolons_accents_decimal_commas(tmp_path):
+    """Check that french csv semicolons accents decimal commas."""
     data = ("Région;Chiffre d'affaires (€);Ventes;Date\n"
             "Île-de-France;1 234,50;12;2025-01-03\n"
             "Bretagne;980,25;7;2025-01-04\n").encode("cp1252")
@@ -24,6 +27,7 @@ def test_french_csv_semicolons_accents_decimal_commas(tmp_path):
 
 
 def test_xlsx_every_sheet_becomes_a_table(tmp_path):
+    """Check that xlsx every sheet becomes a table."""
     wb = Workbook()
     ws = wb.active
     ws.title = "Orders"
@@ -43,6 +47,7 @@ def test_xlsx_every_sheet_becomes_a_table(tmp_path):
 
 
 def test_duplicate_blank_and_hostile_column_names(tmp_path):
+    """Check that duplicate blank and hostile column names."""
     data = b'a,a,,"x""); DROP TABLE t; --",2nd\n1,2,3,4,5\n'
     info = build_database(data, "t.csv", tmp_path)
     cols = info["tables"][0]["columns"]
@@ -51,6 +56,7 @@ def test_duplicate_blank_and_hostile_column_names(tmp_path):
 
 
 def test_uploaded_db_stays_read_only(tmp_path):
+    """Check that uploaded db stays read only."""
     info = build_database(b"x\n1\n", "t.csv", tmp_path)
     before = hashlib.sha256(info["path"].read_bytes()).hexdigest()
     with pytest.raises(Exception):
@@ -65,16 +71,19 @@ def test_uploaded_db_stays_read_only(tmp_path):
     (b"not excel", "a.xlsx", "valid .xlsx"),
 ])
 def test_bad_files_get_clear_messages(tmp_path, data, name, msg):
+    """Check that bad files get clear messages."""
     with pytest.raises(UploadError, match=msg):
         build_database(data, name, tmp_path)
 
 
 def test_path_for_rejects_traversal(tmp_path):
+    """Check that path for rejects traversal."""
     assert path_for("../../etc/passwd", tmp_path) is None
     assert path_for("0" * 32, tmp_path) is None
 
 
 def test_values_and_names():
+    """Check that values and names."""
     assert to_value("12,5") == 12.5 and to_value(" 1 200 ") == 1200 and to_value("") is None
     assert to_value("0612345678") == 612345678 and to_value("33612345678901234") == "33612345678901234"
     assert clean_name("Chiffre d'affaires (€)", "c") == "chiffre_d_affaires"

@@ -1,9 +1,12 @@
+"""Tests for uploading a file and asking about it through the API."""
+
 from urllib.parse import quote
 
 from fastapi.testclient import TestClient
 
 
 def test_upload_then_ask_uses_the_uploaded_data(monkeypatch, tmp_path):
+    """Check that upload then ask uses the uploaded data."""
     import querypilot.uploads as up
     monkeypatch.setattr(up, "UPLOAD_DIR", tmp_path)
     from querypilot import server
@@ -18,6 +21,6 @@ def test_upload_then_ask_uses_the_uploaded_data(monkeypatch, tmp_path):
     assert body["examples"]
     r = client.post("/api/ask", json={"question": "anything", "db_id": body["db_id"]})
     assert r.status_code == 200
-    assert "ventes_ete" in r.text          # the agent explored the uploaded table
+    assert "ventes_ete" in r.text
     assert client.post("/api/ask", json={"question": "q", "db_id": "f" * 32}).status_code == 404
     assert client.post("/api/upload", content=b"x", headers={"X-Filename": "a.pdf"}).status_code == 400
