@@ -68,3 +68,11 @@ def test_row_cap(shop):
     db = SafeDB(shop["db"])
     res = db.query("SELECT * FROM orders", max_rows=2)
     assert len(res.rows) == 2 and res.truncated
+
+
+def test_valid_sqlite_selects_are_never_blocked(shop):
+    from querypilot.safe_db import check_sql
+    for q in ["SELECT `country` FROM customers", "SELECT IIF(id > 1, 'a', 'b') FROM customers",
+              "-- note\nSELECT 1", "SELECT name FROM customers WHERE name LIKE '%;%'",
+              "WITH r AS (SELECT id, RANK() OVER (ORDER BY id) AS k FROM customers) SELECT id FROM r"]:
+        check_sql(q)
