@@ -81,3 +81,13 @@ def test_agent_draft_is_exactly_the_one_shot_request(shop):
     assert b.calls[0]["messages"][0]["content"] == ONE_SHOT_PROMPT
     assert b.calls[0]["messages"][1]["content"] == user_message("Q?", "hint", schema)
     assert a.calls[0]["model"] == b.calls[0]["model"] == LARGE
+
+
+def test_extract_sql_handles_fence_labels():
+    from querypilot.agent import extract_sql
+    assert extract_sql("```sqlite\nSELECT 1;\n```") == "SELECT 1"
+    assert extract_sql("```SQL\nSELECT 1\n```") == "SELECT 1"
+    assert extract_sql("```\nSELECT 1\n```") == "SELECT 1"
+    assert extract_sql("```SELECT a FROM t```") == "SELECT a FROM t"
+    assert extract_sql("Here you go:\nSELECT a FROM t;") == "SELECT a FROM t"
+    assert extract_sql("```sql\nWITH x AS (SELECT 1) SELECT * FROM x\n```").startswith("WITH")

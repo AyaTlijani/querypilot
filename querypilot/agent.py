@@ -63,9 +63,23 @@ def user_message(question: str, evidence: str, schema: str) -> str:
     return "\n\n".join(parts)
 
 
+_LANG_TAGS = {"", "sql", "sqlite", "sqlite3", "postgresql", "mysql", "ansi"}
+_SQL_START = re.compile(r"\b(WITH|SELECT)\b", re.I)
+
+
 def extract_sql(text: str) -> str:
-    m = re.search(r"```(?:sql)?\s*(.+?)```", text or "", re.S | re.I)
-    return (m.group(1) if m else text or "").strip().rstrip(";")
+    """The query from a model reply. Handles ```sql, ```sqlite and other fence labels,
+    and replies without a fence. Never fails a correct query because of formatting."""
+    text = text or ""
+    m = re.search(r"```[ \t]*([A-Za-z0-9_+-]*)[ \t]*\n?(.*?)```", text, re.S)
+    if m:
+        tag, body = m.group(1), m.group(2)
+        if tag.lower() not in _LANG_TAGS:          # e.g. ```SELECT ... on one line
+            body = f"{tag} {body}"
+    else:
+        start = _SQL_START.search(text)
+        body = text[start.start():] if start else text
+    return body.strip().rstrip(";").strip()
 
 
 def _table(res, limit=PREVIEW_ROWS) -> str:
