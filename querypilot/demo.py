@@ -9,6 +9,7 @@ understand. It is never used for benchmark numbers (those come from BIRD).
 from __future__ import annotations
 
 import random
+import re
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
@@ -119,25 +120,18 @@ def offline_llm() -> FakeLLM:
     The UI labels this mode clearly; it is not the real agent."""
 
     def responder(messages, tools, model):
-        if not tools:  # draft / one-shot, or the answer summary
-            if "translate questions into sqlite" in messages[0]["content"].lower():
-                return LLMReply(content="```sql\nSELECT * FROM my_table\n```")  # fails on purpose
-            return LLMReply(content="Offline mode: start Ollama for real answers.")
-        n_tool_msgs = sum(1 for m in messages if m["role"] == "tool")
-        if n_tool_msgs == 0:
-            return LLMReply(content="Let me see which tables exist.",
-                            tool_calls=[{"id": "c1", "name": "list_tables", "arguments": {}}])
-        listed = [m for m in messages if m["role"] == "tool"][0]["content"]
-        tables = [t.strip() for t in listed.split(",") if t.strip()]
-        table = "orders" if "orders" in tables else tables[0]
-        if n_tool_msgs == 1:
-            return LLMReply(content="Checking a few real rows first.",
-                            tool_calls=[{"id": "c2", "name": "sample_rows",
-                                         "arguments": {"table": table, "n": 3}}])
-        sql = ("SELECT status, COUNT(*) AS orders FROM orders GROUP BY status" if table == "orders"
-               else f'SELECT COUNT(*) AS row_count FROM "{table}"')
-        return LLMReply(content="Offline mode: submitting a placeholder query.",
-                        tool_calls=[{"id": "c3", "name": "submit_sql", "arguments": {"sql": sql}}])
+        system = messages[0]["content"].lower()
+        if "previous query did not work" in system:     # repair: use the diagnostics
+            notes = messages[-1]["content"]
+            m = re.search(r"\[list_tables \{\}\]\n([^\n]+)", notes)
+            tables = [t.strip() for t in (m.group(1) if m else "orders").split(",") if t.strip()]
+            table = "orders" if "orders" in tables else tables[0]
+            sql = ("SELECT status, COUNT(*) AS orders FROM orders GROUP BY status" if table == "orders"
+                   else f'SELECT COUNT(*) AS row_count FROM "{table}"')
+            return LLMReply(content=f"```sql\n{sql}\n```")
+        if "translate questions into sqlite" in system:  # first draft fails on purpose
+            return LLMReply(content="```sql\nSELECT * FROM my_table\n```")
+        return LLMReply(content="Offline mode: start Ollama for real answers.")
 
     return FakeLLM(responder=responder)
 
