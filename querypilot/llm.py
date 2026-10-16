@@ -33,9 +33,20 @@ PRICES = {
 }
 
 _DEFAULTS = {"ollama": ("qwen2.5-coder:7b", "qwen2.5-coder:3b"),
-             "mistral": ("mistral-large-latest", "mistral-small-latest")}
-LARGE = os.getenv("QP_LARGE_MODEL", _DEFAULTS.get(PROVIDER, _DEFAULTS["ollama"])[0])
-SMALL = os.getenv("QP_SMALL_MODEL", _DEFAULTS.get(PROVIDER, _DEFAULTS["ollama"])[1])
+             "mistral": ("mistral-large-latest", "mistral-small-latest"),
+             "gemini": ("gemini-3.5-flash-lite", "gemini-3.5-flash-lite")}
+if PROVIDER == "gemini":   # its own variables, so a local-model .env doesn't interfere
+    LARGE = os.getenv("QP_GEMINI_LARGE", _DEFAULTS["gemini"][0])
+    SMALL = os.getenv("QP_GEMINI_SMALL", _DEFAULTS["gemini"][1])
+else:
+    LARGE = os.getenv("QP_LARGE_MODEL", _DEFAULTS.get(PROVIDER, _DEFAULTS["ollama"])[0])
+    SMALL = os.getenv("QP_SMALL_MODEL", _DEFAULTS.get(PROVIDER, _DEFAULTS["ollama"])[1])
+
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+
+
+class QuotaExhausted(RuntimeError):
+    """The provider's daily quota is used up: stop the run, resume later."""
 
 
 @dataclass
@@ -210,8 +221,62 @@ class OllamaClient:
         )
 
 
+class GeminiClient:
+    """Google Gemini through its OpenAI-compatible endpoint, paced for the free tier.
+
+    Free-tier limits are per project and change over time; check yours at
+    https://aistudio.google.com/rate-limit and set QP_GEMINI_RPM accordingly.
+    """
+
+    def __init__(self, api_key: str | None = None):
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        if not self.api_key:
+            raise RuntimeError("GEMINI_API_KEY is not set (put it in your .env file).")
+        self.min_gap = 60.0 / float(os.getenv("QP_GEMINI_RPM", "14"))
+        self._last = 0.0
+
+    def chat(self, messages: list[dict], tools: list[dict] | None = None,
+             model: str = LARGE, temperature: float = 0.0) -> LLMReply:
+        body = {"model": model, "messages": [{"role": m["role"], "content": m.get("content") or ""}
+                                             for m in messages], "temperature": temperature}
+        start = time.monotonic()
+        for attempt in range(6):
+            wait = self._last + self.min_gap - time.monotonic()
+            if wait > 0:
+                time.sleep(wait)          # stay under the requests-per-minute limit
+            self._last = time.monotonic()
+            resp = requests.post(GEMINI_URL, json=body, timeout=120,
+                                 headers={"Authorization": f"Bearer {self.api_key}"})
+            if resp.status_code == 429:
+                text = resp.text.lower()
+                if "per day" in text or "perday" in text or "daily" in text:
+                    raise QuotaExhausted("Gemini daily quota reached. Run the same command "
+                                         "again after the reset (midnight Pacific time).")
+                time.sleep(min(60, 10 * (attempt + 1)))
+                continue
+            if resp.status_code in (500, 502, 503, 504):
+                time.sleep(5 * (attempt + 1))
+                continue
+            if resp.status_code == 404:
+                raise RuntimeError(f"Gemini model '{model}' not found. Check the exact model name "
+                                   "in Google AI Studio and set QP_GEMINI_LARGE in .env.")
+            resp.raise_for_status()
+            break
+        else:
+            raise RuntimeError("Gemini kept refusing requests (rate limit). Try again later.")
+        data = resp.json()
+        usage = data.get("usage", {})
+        content = data["choices"][0]["message"].get("content") or ""
+        return LLMReply(content=content, model=data.get("model", model),
+                        prompt_tokens=usage.get("prompt_tokens", 0),
+                        completion_tokens=usage.get("completion_tokens", 0),
+                        cost_usd=0.0, latency_s=time.monotonic() - start)
+
+
 def make_client():
-    """The configured real model: local Ollama by default, Mistral if QP_PROVIDER=mistral."""
+    """The configured model: local Ollama by default; QP_PROVIDER=gemini or mistral for APIs."""
+    if PROVIDER == "gemini":
+        return GeminiClient()
     return MistralClient() if PROVIDER == "mistral" else OllamaClient()
 
 

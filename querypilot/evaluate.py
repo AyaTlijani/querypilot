@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .agent import Agent, one_shot
+from .llm import QuotaExhausted
 from .safe_db import SafeDB
 from .scoring import score
 
@@ -65,6 +66,8 @@ def run_one(setup: str, llm, db: SafeDB, q: dict, schema: str, use_evidence: boo
             agent = Agent(llm, db, routed=(setup == "routed"), emit=trace.append)
             out = agent.run(q["question"], evidence, schema)
         api_error = ""
+    except QuotaExhausted:
+        raise                      # stop the run; nothing is recorded for this question
     except Exception as err:  # API failures are recorded, never dropped
         out, api_error = {"final_sql": "", "cost": 0.0, "tokens": 0, "calls": 0, "models_used": [],
                           "escalated": False, "repairs": 0}, f"{type(err).__name__}: {err}"
@@ -206,7 +209,12 @@ def main(argv=None):
             if q["db_id"] not in dbs:
                 dbs[q["db_id"]] = SafeDB(find_db(args.db_root, q["db_id"]))
                 schemas[q["db_id"]] = dbs[q["db_id"]].schema_context()
-            rec = run_one(setup, llm, dbs[q["db_id"]], q, schemas[q["db_id"]], not args.no_evidence)
+            try:
+                rec = run_one(setup, llm, dbs[q["db_id"]], q, schemas[q["db_id"]], not args.no_evidence)
+            except QuotaExhausted as err:
+                print(f"\n{err}")
+                stop = True
+                break
             with (args.out / f"{setup}.jsonl").open("a", encoding="utf-8") as f:
                 f.write(json.dumps(rec, default=str) + "\n")
             spent += rec["cost_usd"]

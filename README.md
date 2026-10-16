@@ -122,6 +122,7 @@ python -m querypilot.evaluate                   # full run: 500 questions × 3 s
 - **Time check:** after 20 runs, the runner prints the projected total time. Setups run one after another, so a small GPU keeps a single model loaded.
 - **Resuming:** an interrupted run resumes where it stopped.
 - **Offline dry run:** `--fake` tests the pipeline without a model.
+- **Gemini (free tier):** set `GEMINI_API_KEY` in `.env`, then run with `QP_PROVIDER=gemini` and `--out results_gemini`. Requests are paced for the free tier, and the run stops cleanly when the daily quota is used up, so you can resume the next day.
 - **Paid API option:** set `QP_PROVIDER=mistral` and `MISTRAL_API_KEY` in `.env` to use Mistral's API instead.
 
 **MCP server:**
