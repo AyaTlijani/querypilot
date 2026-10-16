@@ -13,12 +13,14 @@ It runs **entirely locally on open-weight models**: no API cost, and the data ne
 ## What it does
 
 ```
-question ─▶ think ─▶ use tools ─▶ think ─▶ submit SQL ─▶ verify ─┬─▶ answer
-              ▲                                                  │
-              └──────────── repair (error / 0 rows) ◀────────────┘
+question ─▶ draft SQL ─▶ run it ─┬─ rows returned ─────────────────────────────▶ answer
+                                 └─ error / 0 rows ─▶ repair loop with tools ─▶ answer
+                                    (think ─▶ list/describe/sample/run ─▶ submit ─▶ verify)
 ```
 
-- **Explores before answering.** Tools: `list_tables`, `describe_table`, `sample_rows`, `run_sql` (exploration) and `submit_sql` (final answer). It checks real values, for example that a status is stored as `'delivered'` and not `'Delivered'`, before filtering on them.
+- **Execution-guided.** The agent first drafts a query exactly as a one-shot model would, then runs it. A query that executes and returns rows is kept as it is. The agent only switches to its tools when there is evidence of failure (an error or an empty result), so it never talks itself out of a working answer.
+
+- **Repairs with tools.** Tools: `list_tables`, `describe_table`, `sample_rows`, `run_sql` (exploration) and `submit_sql` (final answer). It checks real values, for example that a status is stored as `'delivered'` and not `'Delivered'`, before filtering on them.
 - **Verifies and self-repairs.** A submitted query is executed. If it fails or returns nothing, the agent gets the error back and fixes the query (up to 3 repairs).
 - **Routes between models for efficiency.** It starts on a small model (Qwen2.5-Coder 3B) and escalates to the larger one (7B) only when verification fails or the step budget runs out.
 - **Read-only by construction** (see [Safety](#safety)).
@@ -51,6 +53,8 @@ The web app shows the agent's trace live: every tool call, failed query, repair 
 - Temperature is 0 with a fixed seed. The models and the run date are recorded.
 - **Efficiency is measured in tokens and time per question** (local models have no per-call price).
 - Prompts were not tuned on the 500 test questions.
+
+**A design change, stated openly.** A first pilot run of an "explore first" agent on 16 of the test questions rewrote correct answers into wrong ones. The agent was then changed to the execution-guided design above, which is a general rule, not tuned to any specific question. All reported agent numbers come from a fresh run of the final design.
 
 **Scoring** follows BIRD's official `evaluation_ex.py`:
 - A prediction is correct if `set(predicted_rows) == set(reference_rows)`, so row order and duplicates are ignored.

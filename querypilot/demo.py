@@ -119,9 +119,10 @@ def offline_llm() -> FakeLLM:
     The UI labels this mode clearly; it is not the real agent."""
 
     def responder(messages, tools, model):
-        if not tools:  # one-shot or summary call
-            return LLMReply(content="```sql\nSELECT 1\n```" if "sql" in messages[0]["content"].lower()
-                            else "Offline mode: connect a Mistral API key for real answers.")
+        if not tools:  # draft / one-shot, or the answer summary
+            if "translate questions into sqlite" in messages[0]["content"].lower():
+                return LLMReply(content="```sql\nSELECT * FROM my_table\n```")  # fails on purpose
+            return LLMReply(content="Offline mode: start Ollama for real answers.")
         n_tool_msgs = sum(1 for m in messages if m["role"] == "tool")
         if n_tool_msgs == 0:
             return LLMReply(content="Let me see which tables exist.",

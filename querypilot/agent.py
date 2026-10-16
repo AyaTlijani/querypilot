@@ -1,8 +1,11 @@
 """The QueryPilot agent and the one-shot baseline.
 
-Agent loop (LangGraph):  think -> act (tools) -> think ... -> verify
-                                                    |-- error / empty -> repair (back to think)
-                                                    '-- ok -> done
+Execution-guided agent:
+  1. draft  : write the query exactly like the one-shot baseline
+  2. run it : if it executes and returns rows, that's the answer (a working
+              answer is never rewritten, so the agent can't talk itself out of it)
+  3. repair : only on evidence of failure (error or 0 rows), enter the
+              LangGraph tool loop: think -> act (tools) -> verify -> ...
 
 Three setups share the exact same inputs (question, evidence, schema text):
   * one_shot : one call to the large model, no tools, no repair
@@ -232,15 +235,59 @@ class Agent:
     # -- public --------------------------------------------------------------
     def run(self, question: str, evidence: str = "", schema: str | None = None) -> Run:
         schema = schema if schema is not None else self.db.schema_context()
+        ask = user_message(question, evidence, schema)
         s: Run = {
-            "messages": [{"role": "system", "content": AGENT_PROMPT},
-                         {"role": "user", "content": user_message(question, evidence, schema)}],
-            "steps": 0, "repairs": 0, "model": SMALL if self.routed else LARGE,
+            "messages": [], "steps": 0, "repairs": 0, "model": SMALL if self.routed else LARGE,
             "escalated": False, "final_sql": "", "status": "gave_up", "error": "",
             "cost": 0.0, "tokens": 0, "calls": 0, "models_used": [], "columns": [], "rows": [],
         }
         self.emit({"type": "start", "model": s["model"]})
+
+        # 1) Draft: identical prompt and inputs to the one-shot baseline.
+        draft = self.llm.chat([{"role": "system", "content": ONE_SHOT_PROMPT},
+                               {"role": "user", "content": ask}], model=s["model"])
+        s["cost"] += draft.cost_usd
+        s["tokens"] += draft.prompt_tokens + draft.completion_tokens
+        s["calls"] += 1
+        s["models_used"].append(draft.model)
+        sql = extract_sql(draft.content)
+        self.emit({"type": "draft", "sql": sql, "model": draft.model})
+
+        # 2) Run it. A query that works and returns rows is accepted as is.
+        s["final_sql"] = sql
+        try:
+            res = self.db.query(sql)
+            s["columns"], s["rows"] = res.columns, [list(r) for r in res.rows]
+            s["status"] = "ok" if res.rows else "empty"
+        except Exception as err:
+            s["status"], s["error"] = "error", str(err)
+        self.emit({"type": "verify", "status": s["status"], "error": s["error"],
+                   "rows": len(s["rows"])})
+        if s["status"] == "ok":
+            return self._finish(s)
+
+        # 3) Repair with tools, only because the draft failed.
+        if s["status"] == "empty":
+            feedback = ("Your query returned 0 rows. Check the filter values against real data "
+                        "with sample_rows / run_sql. If 0 rows is truly correct, submit it again.")
+            s["_empty_checked"] = True
+        else:
+            feedback = f"Your query failed: {s['error']}"
+        s["repairs"] = 1
+        s["last_failed_sql"] = sql
+        s["final_sql"] = ""
+        self._maybe_escalate(s, "draft failed")
+        self.emit({"type": "repair", "attempt": 1, "reason": feedback})
+        s["messages"] = [
+            {"role": "system", "content": AGENT_PROMPT},
+            {"role": "user", "content": ask},
+            {"role": "assistant", "content": f"```sql\n{sql}\n```"},
+            {"role": "user", "content": feedback + " Investigate with the tools, then call submit_sql."},
+        ]
         out = self.graph.invoke(s, {"recursion_limit": 4 * MAX_STEPS + 20})
+        return self._finish(out)
+
+    def _finish(self, out) -> Run:
         out = dict(out)
         for k in ("_pending", "_empty_checked", "_next"):
             out.pop(k, None)

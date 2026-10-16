@@ -23,6 +23,8 @@ class Resp:
 def test_agent_runs_through_ollama_format(shop, monkeypatch):
     sent = []
     replies = [
+        {"model": "qwen2.5-coder:7b", "prompt_eval_count": 500, "eval_count": 20,
+         "message": {"content": "```sql\nSELECT COUNT(*) FROM customer\n```"}},
         {"model": "qwen2.5-coder:7b", "prompt_eval_count": 900, "eval_count": 30,
          "message": {"content": "", "tool_calls": [
              {"function": {"name": "sample_rows", "arguments": {"table": "customers"}}}]}},
@@ -37,8 +39,8 @@ def test_agent_runs_through_ollama_format(shop, monkeypatch):
     client = llm.OllamaClient()
     out = Agent(client, SafeDB(shop["db"])).run("How many customers live in France?")
     assert out["status"] == "ok" and out["rows"] == [[2]]
-    assert out["tokens"] == 900 + 30 + 1000 + 25 and out["cost"] == 0
-    second = sent[1]
+    assert out["tokens"] == 500 + 20 + 900 + 30 + 1000 + 25 and out["cost"] == 0
+    second = sent[2]
     assert second["options"]["num_ctx"] >= 8192 and second["options"]["temperature"] == 0
     assistant = [m for m in second["messages"] if m.get("tool_calls")][0]
     assert isinstance(assistant["tool_calls"][0]["function"]["arguments"], dict)
@@ -60,11 +62,12 @@ def test_tool_calls_written_as_text_are_recovered(shop, monkeypatch):
     """qwen2.5-coder:1.5b writes calls as JSON text in a code fence."""
     text = ('```json { "name": "submit_sql", "arguments": { "sql": '
             '"SELECT COUNT(*) FROM customers WHERE country=\'France\'" } } ```')
-    replies = [{"model": "qwen2.5-coder:1.5b", "message": {"content": text}}]
+    replies = [{"model": "qwen2.5-coder:1.5b", "message": {"content": "```sql\nSELECT x FROM nope\n```"}},
+               {"model": "qwen2.5-coder:1.5b", "message": {"content": text}}]
     monkeypatch.setattr(llm.requests, "get", lambda *a, **k: Resp({}))
     monkeypatch.setattr(llm.requests, "post", lambda *a, **k: Resp(replies.pop(0)))
     out = Agent(llm.OllamaClient(), SafeDB(shop["db"])).run("How many customers live in France?")
-    assert out["status"] == "ok" and out["rows"] == [[2]] and out["calls"] == 1
+    assert out["status"] == "ok" and out["rows"] == [[2]] and out["calls"] == 2
 
 
 def test_text_parser_variants():

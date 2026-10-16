@@ -130,11 +130,11 @@ def to_markdown(summary: dict) -> str:
              "",
              f"Models: {m.get('models', '?')} · provider: {m.get('provider', '?')}",
              "",
-             "| Setup | Questions | EX | Tokens / question | Cost / question | Avg latency | LLM calls | Escalated |",
+             "| Setup | Questions | EX | Tokens / question | Cost / question | Median time | LLM calls | Escalated |",
              "|---|---|---|---|---|---|---|---|"]
     for name, s in summary["setups"].items():
         lines.append(f"| {name} | {s['n']} | **{s['ex']}%** | {s.get('tokens_per_question', 0)} | "
-                     f"${s['cost_per_question_usd']:.4f} | {s['avg_latency_s']} s | {s['avg_llm_calls']} | "
+                     f"${s['cost_per_question_usd']:.4f} | {s['median_latency_s']} s | {s['avg_llm_calls']} | "
                      f"{s['escalation_rate']}% |")
     lines += ["", "## By difficulty", "", "| Setup | " + " | ".join(
         sorted({d for s in summary['setups'].values() for d in s['by_difficulty']})) + " |"]

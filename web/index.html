@@ -414,6 +414,7 @@ function addStep(e) {
       (e.name === "run_sql" ? `<pre>${arg}</pre>` : "") + `<pre>${esc(e.output)}</pre>`;
   }
   else if (e.type === "submit") body = `<span class="k">submit final query</span><pre>${esc(e.sql)}</pre>`;
+  else if (e.type === "draft") { ic = "✎"; cls = "sub"; body = `<span class="k">first draft</span> · ${esc(e.model || "")}<pre>${esc(e.sql)}</pre>`; }
   else if (e.type === "verify") {
     if (e.status !== "ok") { cls = e.status === "empty" ? "up" : "bad"; ic = e.status === "empty" ? "∅" : "✗"; }
     body = `<span class="k">verify</span> · ${e.status === "ok" ? e.rows + " rows ✓" : e.status === "empty" ? "0 rows — suspicious" : "failed: " + esc(e.error)}`;
@@ -510,7 +511,7 @@ async function loadResults() {
     <div class="ex">${s.ex}%</div><span class="mono" style="font-size:10px">execution accuracy · ${s.n} questions</span>
     <dl>${s.cost_per_question_usd > 0 ? `<dt>cost / question</dt><dd>$${s.cost_per_question_usd.toFixed(4)}</dd>` : ""}
     <dt>tokens / question</dt><dd>${(s.tokens_per_question || 0).toLocaleString()}</dd>
-    <dt>avg latency</dt><dd>${s.avg_latency_s} s</dd><dt>llm calls</dt><dd>${s.avg_llm_calls}</dd>
+    <dt>median time</dt><dd>${s.median_latency_s} s</dd><dt>llm calls</dt><dd>${s.avg_llm_calls}</dd>
     <dt>escalated</dt><dd>${s.escalation_rate}%</dd><dt>near-misses*</dt><dd>${s.near_misses_not_counted}</dd></dl></div>`).join("");
   const diffs = [...new Set(setups.flatMap(([, s]) => Object.keys(s.by_difficulty)))];
   const order = ["simple", "moderate", "challenging"]; diffs.sort((a, b) => order.indexOf(a) - order.indexOf(b));
